@@ -11,6 +11,8 @@ Cove 是本机 AI 网关：一个 Go 进程、嵌入 React 控制台、SQLite �
 构建需要 Go 1.26.2、Node 22.12+、npm、Python 3 和本平台 C 编译器；SQLite 使用 CGO。生成的二进制已嵌入前端，运行不需要 Go 或 Node。
 
 ```sh
+git clone https://github.com/majiayu000/cove.git
+cd cove
 make build
 ./bin/gatt -config config.example.json -data-dir /absolute/private/Cove serve
 ```
