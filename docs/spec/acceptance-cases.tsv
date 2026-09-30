@@ -1,0 +1,105 @@
+id	sections	setup_input	steps	success_assertions	failure_assertions
+R001	4.2/32.1	空临时数据目录与未占用端口	启动A；同目录启动B；停A再启B	A ready；B不能并发打开目录；A退出后B可启动	端口被占/目录无权限时明确失败且不创建半个可用实例
+R002	4.2	运行实例与可注入store错误	访问health/ready；注入存储故障后再访问并调用	health保持存活；ready503；新请求不派发	故障不能只更新UI而继续记账不可靠的调用
+R003	13.1	空session浏览器、精确本机origin	直达页面、刷新、新标签、服务重启	自动获取管理session；可见API Keys；无密码必填	sessionStorage失败时显示原因和可重试入口
+R004	13.1	真实管理session与合成客户端Key	从不同Origin/Host/端口发送写请求；交换两种认证	只有精确管理边界写入；Key不能访问admin	CSRF写入/Host注入/数据面用session均拒绝且零配置变化
+R005	4.2	活动SSE、OAuth、刷新、维护各1项	发shutdown并收集owner退出顺序	停止准入→取消/排空→关闭DB；活动资源回收	到期限仍未排空标超时失败，不称正常关闭
+R006	11.2	临时DB、可注入事务和fsync失败	分别在dispatch前后失败并重启	前者零上游；后者停止准入；旧在途标interrupted	未知结果不自动重发或记成0费用
+R007	4.3/26.5	两个管理会话读取同version	A修改配置；B用旧version修改；同时保留一条在途请求	B409；新请求新快照；在途旧快照	旧响应不能覆盖新版本UI或回滚配置
+R008	17.1/32.1	打包产物、源码hash、内嵌JS	运行产物读取status/build manifest/JS hash	三者一致可追踪到构建输入	替换旧JS或假buildID时验收失败
+R009	17.1/32.1	无Go/Node的干净macOS用户	下载/解包指定包、启动、打开控制台、建合成Key	不需开发工具；API Keys入口与创建可用	缺动态库/权限/端口冲突给具体原因
+R010	16/33.1	prompt/token/tool内容内放唯一合成标记	调用、失败、导出诊断；检查DB日志metric	正文默认不落盘；secret无任何出口	原始upstream error含secret也必须脱敏
+R011	5.1/26.2	来源S被路由和Key引用且有活动请求	停用S、尝试新调用、删除S	新调用拒绝；在途按合同结束；删除409引用列表	删除失败原配置不变；不级联悄删Key/账目
+R012	5.1/27.2/36.3	Responses/Chat-only/Messages三种合成上游；adapter-fixtures.json合成样例与固定client/provider版本	相同文本/工具请求分别选正确native来源；按v1.2适配卡核对成功路径所需外部条件	path/header/body匹配协议；同协议不绕Responses	Chat-only不能收到/responses；特定云认证仍按D02补齐；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R013	3.1/5.4	两个source引用同account且token到期	同时发送多个请求触发refresh	只一次account刷新；共享并发限制	等待者取消不取消其他请求；不能每source复制refresh token
+R014	5.3	独立OAuth测试服务、真实验收另记E01	执行state/PKCE/nonce/code/身份校验→持久化	各步骤验证后ready；不读取日常auth文件	错state/nonce/audience/过期签名/回调端口绑定失败均不发布凭据
+R015	5.3/26.4	已有账号A和pending新身份B	双击登录、取消、送晚回调；另次确认换B	同操作复用；取消后不复活；确认才换身份	旧version confirm409；拒绝换身份保留A
+R016	5.4	旋转refresh token模拟器、20并发	同时刷新；某等待者取消；模拟token已旋转但响应丢失	一次刷新、成功原子发布；unknown进入needs_reauth	未知旋转不重复用旧token；晚结果generation不符不发布
+R017	5.2/5.4	有效凭据与可注入DB失败的secret store	替换凭据中DB失败；另次退出后送晚结果	新secret补偿；退出先durable解绑；旧任务无效	secret清理失败有诊断但不恢复已退出认证
+R018	27.3/36.1	逐provider授权/refresh/身份/推理fixture；adapter-fixtures.json合成样例与固定client/provider版本	按D01/D02固定合同后分别跑授权、拒绝、过期、刷新与工具两轮；按v1.2适配卡核对成功路径所需外部条件	每provider独立验证卡；不同auth flow不混淆	缺client注册或endpoint字段时不能标支持；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R019	5.5/27.4/36.2	百分比窗口/token窗口/unsupported三种quota响应；adapter-fixtures.json合成样例与固定client/provider版本	手刷并后台同时刷；时间推进至stale；按v1.2适配卡核对成功路径所需外部条件	合并请求、单位与reset准确；stale保留上次值	没有接口返回unsupported，不伪造余额；原始字段仍待D02；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R020	5.2/14	代理可记录目标、跨origin302、坏TLS	推理/授权/模型/额度分别调用；模拟重定向	使用同选定网络策略；错误阶段可定位	凭据不能随302跨域；TLS错误不靠关闭校验隐瞒
+R021	6.1/26.2	手工模型M和发现目录N	发现成功、目录变化、随后失败	M保留；N有时间/provenance；旧目录stale	发现失败不清空用户配置；发现不冒充真实资格
+R022	6.1	Key只允许A模型且B有来源但被禁用	GET models；直接调A/B/不存在模型	列表与可调用候选同一权限交集	B不因手工指定绕过模型权限或来源禁用
+R023	6.1/26.3	别名coding映射两个明确成员	调用并看请求与attempt详情	requested=coding，sent与reported分别记录	重复别名/别名链拒绝；不悄悄改贵模型为便宜模型
+R024	6.2	同模型text已验/tool未验/image不支持	查看UI/API矩阵并发起各能力请求	三个状态不同；UI与后端同来源	一个text成功不得绿化全部feature
+R025	6.2	同来源两个模型两个协议	只验证其中一格，修改source generation	仅所测格passed；改generation旧证据stale	旧测试晚返回不把新配置标passed
+R026	15.4	真实客户端、允许执行的临时目录工具	模型请求工具→客户端执行→回传→最终文本	两轮request/工具ID与最终结果可证明	仅看到tool_call JSON或伪造工具结果不能通过
+R027	9.1/34.1	同名并行工具A/B，交错参数碎片与完整history	分片转发、回传两个结果并继续	ID/参数/顺序不串；opaque保持同源	半截JSON不提前执行；跨Key历史拒绝
+R028	6.1/27.4/36.2	模型元数据有已知与未知context/max_output；adapter-fixtures.json合成样例与固定client/provider版本	手工覆盖再查看证据和选路；按v1.2适配卡核对成功路径所需外部条件	未知为null；manual与provider证据分开	不填示例模型限制；订阅真实元数据映射待D02；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R029	12.2/26.3	同source两个模型不同价格	各调用一次，随后新增价格版本	费用按对应model+价格快照；旧账不变	未知维度保留partial，不能按source统一价覆盖
+R030	3.2/6.2	passed验证与source/account/adapter版本	依次换endpoint/凭据/模型/adapter	相关证据变stale；改显示名不失效	晚旧结果不发布为新版本验证
+R031	7.1/31.4	空库普通浏览器	找到API Keys→创建→选择来源/模型→提交	入口常驻；一次明文面板与接入信息齐全	无来源给下一步；不要求用户从控制台手写API
+R032	7.1/26.4	合成Key创建action_id	创建成功后刷新/list/export；模拟响应丢失重提	只一次返回明文；重复action显示已创建不可恢复	日志/DB/URL/localStorage无secret；不能用幂等缓存保存明文
+R033	7.2/26.3	Key固定source后改绑定route	版本CAS修改并尝试引用旧资源	新请求按route；旧资源权限按原归属检查	旧version409；换绑不能取得别的账号资源
+R034	7.2/26.3	Key模型A、协议Messages、operation限定	提交越权模型/协议/files；再测试null与空数组	权限交集执行；null继承、空数组禁止	403且零上游；文件路径不能绕协议Key
+R035	7.2/26.3	将到期Key、活动与排队请求	推进UTC到expiry；停用/撤销；显式cancel_active	新派发拒绝；默认在途继续，显式取消有结果	撤销不可恢复旧secret；排队不继续派发
+R036	7.3/26.3	旧Key与配置预览	rotate生成新Key，验证后撤旧；模拟apply失败	两条可见Key；revoke_at准确；失败不重复创建	新Key写失败不自动撤旧，secret不可找回要明示
+R037	7.4/34.2	注入时钟rpm=2、tpm估算限制	连续调用再推进窗口；终态actual替换预估	RPM边界/Retry-After准确；TPM不重复算预留+actual	未知token只标估算；不能承诺软估算是硬封顶
+R038	7.4/34.2	global/key/route/account不同槽位上限	并发请求、取消、排队和失败释放	统一准入计数，任何层不超本地限制	半途失败无漏槽；网络等待不持有准入锁
+R039	12.3/26.3	Key绑定预算、部分已结算和unknown费用	在创建页设置，调用后看列表和用量	settled/reserved/pending/available各可见	只显示输入金额但无执行/反馈不能算完成
+R040	7.1/15.2	Key仅允许一个别名和Responses	打开接入指南、复制示例并实际调用	URL/model/protocol对应Key；成功dispatch更新last_seen	仅GET列表或失败鉴权不更新真实使用时间
+R041	8/9.1	Responses原生JSON/SSE与opaque output	官方SDK解析、回传完整输出继续	原生字段和output顺序保留	未知合法native字段不能被白名单无故丢弃
+R042	8.2/34.1	Chat原生和Responses来源，同两轮工具fixture	JSON/stream各执行并回传tool result	路径正确、finish/tool ID合法、两轮结果一致	n>1等无法表达语义422且零多余调用
+R043	8.2/34.1	Messages原生与可转换来源	stream/JSON工具循环；stop sequence/错误场景	content blocks、usage数字、stop语义SDK接受	native签名/cache字段不能经Responses丢失
+R044	9.2	Codex来源参数调整关闭/开启各一	Messages正max_tokens分别调用；再测0与strict预算	关闭422；开启记录上限未落实并完成真实工具验收	max_tokens=0不得改成生成；strict预算排除此假上界
+R045	9.1/34.1	包含system/developer/schema/strict/choice/stop字段矩阵	对每个目标协议逐字段送正向与不支持输入	有明确映射或派发前422及field	不得静默删未知参数、把JSON object冒充strict schema
+R046	9.4/34.1	UTF8/CRLF/多行data/重复终态/交错工具字节流	所有切割边界喂解析器并SDK读取	内容完整；终态和usage最多一次	EOF无终态不成功；超观察上限按partial/unknown记录
+R047	9.3/34.1	固定tokenizer fixtures、原生实际usage与转换估算	Messages start/delta/stop经严格SDK解析	wire数字合法；input估算固定；实际账务独立	unknown实际不写0；累计usage不逐帧相加
+R048	9.1/30.1	真实或合成opaque签名history	同源重放；跨provider和不兼容协议重放	原生内容hash不变；跨协议明确拒绝	不伪造签名、删除思考块后自动重试
+R049	9.4	堵塞下游writer、可统计上游POST	取消context；制造网络断开/transport重试条件	取消唤醒writer且上游最多一次未授权重放为0	已发工具delta之后不能切来源重试
+R050	14/26.1	401/403/409/422/429/502/504/503 fixtures	分别调用三协议和管理接口	对应协议错误形状/状态/field/request_id正确	stream已开始不追加成功；Set-Cookie/secret header不泄漏
+R051	10.1/26.3	两个可用source模型	在UI/API建route→绑Key→预览→调用	配置能保存生效，选中成员可追踪	空route可保存草稿但不能伪装可调用
+R052	10.1/34.2	同priority权重1:3，另低priority成员	串行40次与并发长期调用	串行10:30；低priority不用；并发无race/漏槽	preview不推进游标；不可用高权成员不吞全部请求
+R053	10.4	scope不同的401/429/5xx与时钟	触发阈值、推进冷却、发并发半开请求	只相应account/model/operation冷却；half-open单个	冷却不篡改enabled；unknown quota不能永久封锁
+R054	10.2	明确未发送、明确未执行429、未知提交timeout	max_attempts=2分别运行并统计POST	安全分支最多2；未知不重放；总deadline包含尝试	部分输出或工具起始后不得第二attempt
+R055	11.1/11.2	一request的失败attempt1与成功attempt2	持久化/详情/汇总并重复写sequence2	两尝试完整且费用各算；重复sequence拒绝	成功不覆盖失败；失败已知usage不归零
+R056	10.3/29.1	Key A创建response/file，Key B同provider	B读取续接；A换account generation后续接	B404/拒绝；A失效绑定409	不能按裸provider资源ID绕本地归属
+R057	10.3	相同session ID用于两个Key	同Key短期调用、跨Key、过TTL和硬binding	同Key亲和；跨Key不共享；binding优先	账号不再可用不能用亲和越过权限/健康规则
+R058	7.4/34.2	queue默认0和显式2、满并发	发送大body、取消排队、超5秒、撤销Key	先容量检查；队列有界；取消移除；派发前重检	无界读取/占account槽排队/超时后仍派发均失败
+R059	10.1	工具/协议/额度/context各不匹配的候选	同一请求route preview并实际调用	不合格候选排除理由一致；unknown quota不当0	不能为故障切换偷偷换模型或忽略strict预算资格
+R060	10.1/4.3	配置v1下活动请求和v2新成员	运行期间改route并查看所有attempt	每request的策略快照及排除理由可追踪	preview无上游/预留；新配置不改写旧attempt归属
+R061	12.1	actual0、partial、unknown与缓存/reasoningusage	生成记录后按日/模型汇总	三类明确，缓存/reasoning不重复计入总量	失败已知usage保留；unknown不画成实测0
+R062	12.2	USD/CNY两币种、部分价格与订阅来源	聚合报表，修改价格后再看旧记录	币种分开；旧快照不变；partial有标志	不相加不同币种；subscription不冒称API账单
+R063	12.3/34.3	20并发与instance/route/Key多层预算	同时预留、在中间插入事务失败	总预留不超本地上界；多层全成或全败	事务外先读后写导致超额/半笔预留不可接受
+R064	11.2/34.3	terminal重复、unknown崩溃、已派发取消	结算两次、重启、手工核对有证据金额	只结一次；unknown保留pending；人工值有audit	取消不退款为0；无证据清零不允许
+R065	12.3	可证token上界API与忽略max_tokens订阅	strict与soft各调用一次	strict只选有可信全价上界操作；soft标估算	不能通过随意预留大数把unknown说成strict
+R066	5.5/27.4/36.2	两个额度窗口、阈值、reset、stale响应；adapter-fixtures.json合成样例与固定client/provider版本	推进窗口与刷新失败/成功；按v1.2适配卡核对成功路径所需外部条件	每窗口单位/重置时间/提醒/恢复正确	未知reset不编时间；provider字段适配需D02证据；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R067	12.4/26.5	跨Key/model/source/protocol的多attempt数据	组合过滤分页、请求详情、usage分组	同过滤语义；request/attempt数量可区分	EXISTS筛中一个attempt后不能把请求其他attempt隐藏
+R068	12.4	管理文本/工具验证与普通API各一次	比较requests/usage并按origin筛选	管理测试走共同计量，origin清楚可筛	验证不能走不记账的专用HTTP捷径
+R069	12.4/32.4	含公式前缀字段、到期/预算未决记录	CSV/JSON导出；预览并执行清理	CSV安全，JSON合法；到期普通记录清理	pending账务/活动资源不随日志删除；清理失败可恢复
+R070	17.4/26.5	100万合成记录和固定机器参数	按Key/日期分页及SQL query plan、测P95/RSS	索引查询；内存不随全历史线性增长；性能报告可复核	禁止全量拉JSON进内存假分页；不凭公网延迟判网关性能
+R071	15.1/31.4	空库与有数据后各页面	逐导航完成该页至少一项创建/查询/恢复动作	每模块有入口、结果、空态、失败态	占位页/按钮无handler/无入口均不能标交付
+R072	15.1/31.4	慢响应A、快响应B、键盘与小屏	快速切source/filter；409后编辑；375px/200%缩放	旧响应不覆盖新选择；输入保留；焦点可达	全局busy冻结无关账号/单页失败白屏不通过
+R073	1.2/31.4	干净用户与可用真实来源	来源→模型→Key→客户端配置→工具循环→请求记录	每一步有下一步与真实结果；可查到使用的Key	HTTP200无协议成功/只见页面不能算闭环
+R074	15.3/31.1/36.4	选定客户端版本/目录的只读配置样本；adapter-fixtures.json合成样例与固定client/provider版本	detect→preview路径/scope/hash/diff；按v1.2适配卡核对成功路径所需外部条件	无写入无秘密；缺文件显示create	未知版本/格式不自动写；其他客户端精确schema待D03；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R075	15.3/31.1/36.4	两文件preview后其中一份被用户修改；adapter-fixtures.json合成样例与固定client/provider版本	apply并注入第二文件磁盘写失败；按v1.2适配卡核对成功路径所需外部条件	hash变409；单文件原子；部分失败逐文件记录	不得称多文件事务全成功；客户端parser细节待D03；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R076	15.3/31.1	before/ours/current三版配置和官方auth	恢复预览→保留用户后改→确认指定冲突	只还原Cove字段，官方auth hash不变	current非ours的字段不能无提示覆盖
+R077	15.2/30.2/30.3	指定版本真实Codex与用户选定模型	文本、shell工具两轮、并行、长历史、所需compact/WS	逐能力与构建证据；真实工具在客户端执行	任一客户端必需操作未过不能标完整兼容
+R078	15.2/34.1	真实Claude Code/SDK与native/订阅两来源	各跑stream/JSON工具、usage、取消、长history	两来源独立证据，SDK解析与工具循环通过	native通过不替代Codex Messages通过
+R079	31.2/36.4	Gemini/OpenCode/各编辑器指定版本；adapter-fixtures.json合成样例与固定client/provider版本	按D03固定配置后分别测chat/edit/agent与restore；按v1.2适配卡核对成功路径所需外部条件	逐版本逐模式结果，不用一个兼容勾	能填URL/聊天成功不能宣称agent工具可用；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R080	15.1/26.5	失败、多attempt、adjustment和unknown请求	打开深链接，定位来源/账号/模型、取消或跳修复	详情一处给所有事实与准确可执行动作	已完成请求取消不改历史；无法定位不能只报操作失败
+R081	5.2/16	并发secret修改、symlink、坏JSON与fsync故障	更新两条secret并分别注入故障	不丢新值；不确定fsync锁定；private权限	不能覆盖损坏/符号链接目标或假发布成功
+R082	32.3/32.4	合成metadata/full包与正确/错误口令	备份→预览→新目录恢复→切换/失败回退	一致DB+secrets；metadata需新Key/重登；旧目录可用	坏hash/逃逸路径/未排空拒绝且不覆真实DB
+R083	16/33.1	端口占用、存储故障、认证过期、无route候选	doctor与诊断导出/脱敏预览	每问题定位阶段与修复入口，audit可追踪	诊断无token/prompt/完整认证URL，不能以绿勾掩盖错误
+R084	32.1	每平台用户级service manager	install/start/status/stop/uninstall和用户重登	实际PID/端口/build匹配，注册移除但数据保留	权限不足/已有其他注册明确失败，不隐式提权
+R085	32.2	签名包、旧数据快照、更新journal	好包更新；坏hash/断电/schema改变/ready失败	只校验后替换；失败回到一致旧binary+数据	更新后已有新数据不自动回滚丢弃；没签名不假称在线更新完成
+R086	17.1/32.1	macOS/Linux/Windows各目标真实包	空格中文路径、目录权限、锁、浏览器与启动	每OS/arch单独证据；不用开发机结果替代	CGO缺库/Windows文件锁/ACL错误必须暴露
+R087	14/17.4	同机8路合成30分钟长流	测RSS/队列上限、随机取消与大帧	内存有界；取消5秒内回收目标有测量	不能把provider公网快慢当自身基准；超body边界零额外分配
+R088	9.4/14	慢header、真upstream idle、慢下游writer、代理断网	分别触发各timer再恢复网络	stage不同；背压不算upstream idle；恢复不重放unknown	一个总timeout代替全部且误取消正常流不通过
+R089	21/23	单测/SDK/UI/真实provider/干净安装五类证据	按build/模型/客户端/时间索引验收表	每pass对应实际artifact；失败与未测保留	拟新增测试名字/文档检查不能计为运行通过
+R090	0.1/20/24	旧A01–A45、104目标、脚本调用者	逐项映射并检查已替代旧决策	45项全部去向；只一个规范来源	删除ticket后仍有调用脚本/补充Spec相互矛盾不能通过
+R091	30.1	Gemini签名、同名并行工具、多个candidate	原生SSE/JSON/计数与允许交集转换	签名原样、工具ID准确、计数provenance清晰	缺工具身份无法配对则400；不删signature重试
+R092	28.2	合成透明PNG、两张生成与恶意base64	图像输入/生成/编辑、SSE partial/terminal	原生mime/数量/格式、usage保存且不重复	超大小/跨Key文件/坏mime拒绝；无隐式图片下载或转文本
+R093	28.3/30.4	2秒音频、TTS指定格式、Realtime WS	转录/翻译/TTS/实时打断/工具/VAD各跑	字幕/音频格式正确；会话和response账目不双算	断流不假完整；严格预算不能假保证VAD；不冒称WebRTC已支持
+R094	28.4	多输入embedding、重复文档rerank	不同encoding/dimensions、top_n=1、乱序响应	向量index维度正确、重排score降序且原index准确	重复index/NaN/越界502；不自动用向量相似度代原生rerank
+R095	29	两Key、文件、background response、三行batch	CRUD/断开恢复/取消/乱序结果重复拉取	资源隔离持久；job只轮询；逐行计量一次	DB失败orphan明确；终态少行保留unknown；不重发Batch
+R096	30.2/30.3/36.3	Codex0.158.0 tag064c6b8源码合同；同账号工具历史；API compact与订阅streamed compaction分别准备；adapter-fixtures.json K01-K05/W01-W02	公开API compact返回完整窗口并续接；Codex原生Responses末尾加入compaction_trigger，收集恰好一个compaction item和completed，由CLI组装历史续接；分别验证API多lane和订阅单laneWS	opaque和工具历史不改写；真实usage只记一次；SSE/WS取消归属正确；fixture与原生客户端真实实验分开记录	缺item、双item、无completed、跨账号引用失败且不重放；订阅原生/compact端点不支持时422；跨Chat/Messages不吞trigger；第二订阅lane未验证时不得派发
+R097	30.5/36.3	native server tool与可缓存纯文本/工具请求；adapter-fixtures.json合成样例与固定client/provider版本	工具输出/计费；同Key命中、跨Key/账号变化重试；按v1.2适配卡核对成功路径所需外部条件	原生工具结构保留；缓存只有首次调用、标replayed	未知资源ID拒绝；工具不命中缓存；file_search资源adapter待D02；缺准入/wire/schema时不得dispatch或写入，不能将manual/unknown标为完整支持
+R098	31.3/36.4	8客户端固定版本配置、MCP样例M01-M08、各客户端项目Skills目录；合成SKILL.md；同名及用户修改样本	分别预览MCP条目与Skills文件；应用后由客户端自主加载；Continue经loadMarkdownSkills/readSkill校验name；再改用户字段执行三方恢复	正确字段/目录被实际客户端读取；秘密不出diff；只恢复Cove所写且未被用户更改的部分；复制成功与激活成功分别展示	同名MCP、重复skill name、缺frontmatter、越界符号链接或路径逃逸拒绝；用户后改文件保留冲突；Cove不启动MCP command或执行skill脚本
+R099	1.3/35.3	个人产品范围与多人/充值能力清单	逐项标明范围外原因和变更触发	没有把未做的个人必需能力藏入范围外	本机自动session不能直接宣称可安全多人远程部署
+R100	22/25/35	需求/设计/实现/运行四张事实视图	逐R与旧A核对，核验D和E状态	覆盖完整、设计缺口与未测试验都明确可追踪	任何D open不能宣称全部设计完；模拟pass不替代真人授权
+R101	33.1	离线collector、合成secret、重复terminal	持续推理10分钟、查metrics/log/span	有界队列、不阻塞、drop可见、无高基数秘密标签	原始正文/secret不得导出；usage终态不能重复增加
+R102	33.3	三候选不同价格/币种/TTFT/context	固定时钟preview与真实选路，修改价格	已知同义候选确定排序，快照/unknown理由可见	不自动删prompt/跨模型/把订阅unknown当0元
+R103	33.4	依赖完整包、缺引用包、同名冲突包	export→preview→选冲突→CAS import，注入事务失败	引用正确、秘密占位、全事务发布/回滚	无提示合并账号/吞未知字段/导入即付费测试均失败
+R104	33.2	重复故障/恢复/再次故障、故障webhook	100次同故障、dismiss、恢复、重试发送	去重与恢复准确，event_id稳定，发送次数有界	通知失败不触发模型重试；secret/内网SSRF/redirect被阻止

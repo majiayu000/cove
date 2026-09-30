@@ -1,0 +1,34 @@
+import React, { useEffect, useRef, useState } from "react";
+type API = <T = any>(path:string,method?:string,body?:unknown)=>Promise<T>;
+export function AccountConsole({api,onChanged}:{api:API;onChanged:()=>Promise<void>}) {
+ const [accounts,setAccounts]=useState<any[]>([]),[pending,setPending]=useState<string[]>([]),[error,setError]=useState(""),[notice,setNotice]=useState("");
+ const [nameEdits,setNameEdits]=useState<Record<string,{version:number;name:string;readError?:string}>>({});
+ const [credentialEdits,setCredentialEdits]=useState<Record<string,{version:number;formVersion:number;generation:number;readError?:string}>>({});
+ const revision=useRef(0),running=useRef(new Set<string>()),mounted=useRef(true);
+ async function load(){const n=++revision.current;try{const v=await api("accounts");if(mounted.current&&n===revision.current)setAccounts(old=>v.items.map((item:any)=>{const previous=old.find(a=>a.id===item.id);return previous&&previous.version>item.version?previous:item}))}catch(e){if(mounted.current&&n===revision.current)setError((e as Error).message)}}
+ useEffect(()=>{mounted.current=true;void load();return()=>{mounted.current=false;revision.current++}},[api]);
+ async function run(id:string,work:()=>Promise<void>){if(running.current.has(id))return;running.current.add(id);setPending([...running.current]);setError("");setNotice("");try{await work();await Promise.all([load(),onChanged()])}catch(e){if(mounted.current)setError((e as Error).message)}finally{running.current.delete(id);if(mounted.current)setPending([...running.current])}}
+ async function readConflict(id:string,error:unknown,onReadError:(message:string)=>void){
+   if((error as Error&{status?:number}).status!==409)return;
+   try{const latest=await api(`accounts/${id}`);if(mounted.current)setAccounts(old=>old.map(v=>v.id===id&&latest.version>=v.version?latest:v))}
+   catch(readError){if(mounted.current)onReadError(`无法读取当前账号：${(readError as Error).message}`)}
+ }
+ return <section className="panel"><h2>账号与凭据</h2><p>一个账号可被多个来源引用。来源负责端点和模型；换凭据提升账号代次，旧续接和验证随之失效。</p>{error&&<p role="alert" className="error">{error}</p>}{notice&&<p role="status" className="notice">{notice}</p>}
+ <details><summary>创建独立账号</summary><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void run("create",async()=>{const [provider,auth_type]=String(f.get("provider")).split(":");await api("accounts","POST",{name:f.get("name"),provider,auth_type});setNotice("账号已创建，API凭据可在下方单独配置。新来源可填写此账号ID复用。")})}}><label>名称<input name="name" required maxLength={100}/></label><label>认证卡<select name="provider"><option value="openai_compatible:api_key">OpenAI 兼容 API Key</option><option value="openai:api_key">OpenAI API Key</option><option value="anthropic:api_key">Anthropic API Key</option><option value="gemini:api_key">Gemini API Key</option><option value="local:none">本机无认证服务</option><option value="codex:codex_subscription">Codex 独立授权</option></select></label><button disabled={pending.includes("create")}>创建账号</button></form></details>
+ {accounts.map(v=>{const nameEdit=nameEdits[v.id],credentialEdit=credentialEdits[v.id],busy=pending.includes(v.id);return <article className="source-card" key={v.id}><div className="section-title"><h3>{v.name}</h3><span className="badge muted">{v.auth_state} · 代次 {v.generation}</span></div><code>{v.id}</code><p>{v.provider} · {v.auth_type} · {v.source_ids.length} 个来源 · 额度 {v.quota_status||"未知"}</p><details><summary>修改名称</summary><form onSubmit={e=>{e.preventDefault();const name=String(new FormData(e.currentTarget).get("name")),version=nameEdit?.version??v.version;void run(v.id,async()=>{
+   try{await api(`accounts/${v.id}`,"PATCH",{version,name})}catch(error){if(mounted.current)setNameEdits(old=>({...old,[v.id]:{version,name}}));await readConflict(v.id,error,message=>setNameEdits(old=>({...old,[v.id]:{version,name,readError:message}})));throw error}
+   if(mounted.current)setNameEdits(old=>{const next={...old};delete next[v.id];return next});
+ })}}><input name="name" value={nameEdit?.name??v.name} disabled={busy} onChange={e=>{const name=e.target.value;setNameEdits(old=>({...old,[v.id]:{...(old[v.id]??{version:v.version}),name}}))}} aria-label="账号名称" required/><button disabled={busy}>保存名称</button>
+ {nameEdit&&nameEdit.version!==v.version&&<div role="region" aria-label="账号名称版本冲突" aria-live="polite"><p>编辑基于 v{nameEdit.version}；当前 v{v.version}。当前名称 {v.name}；本地输入 {nameEdit.name}。</p><button type="button" disabled={busy} onClick={()=>setNameEdits(old=>({...old,[v.id]:{version:v.version,name:nameEdit.name}}))}>使用当前版本，保留名称输入</button><button type="button" disabled={busy} onClick={()=>setNameEdits(old=>{const next={...old};delete next[v.id];return next})}>放弃名称修改</button></div>}
+ {nameEdit?.readError&&<p role="alert" className="error">{nameEdit.readError}；名称输入已保留。</p>}
+ </form></details>
+ {v.auth_type==="api_key"&&<details><summary>{v.credential_present?"替换凭据":"配置凭据"}</summary><form key={credentialEdit?.formVersion??v.version} onSubmit={e=>{e.preventDefault();const target=e.currentTarget,secret=String(new FormData(target).get("secret")),edit=credentialEdit??{version:v.version,formVersion:v.version,generation:v.generation};void run(v.id,async()=>{
+   try{await api(`accounts/${v.id}/credential`,"POST",{version:edit.version,secret})}catch(error){if(mounted.current)setCredentialEdits(old=>({...old,[v.id]:edit}));await readConflict(v.id,error,message=>setCredentialEdits(old=>({...old,[v.id]:{...edit,readError:message}})));throw error}
+   target.reset();if(mounted.current){setCredentialEdits(old=>{const next={...old};delete next[v.id];return next});setNotice("账号凭据已安全发布，关联来源使用新代次。")}
+ })}}><input name="secret" type="password" autoComplete="off" aria-label="账号API凭据" required disabled={busy} onChange={()=>setCredentialEdits(old=>old[v.id]?old:{...old,[v.id]:{version:v.version,formVersion:v.version,generation:v.generation}})}/><button disabled={busy}>保存凭据</button>
+ {credentialEdit&&credentialEdit.version!==v.version&&<div role="region" aria-label="账号凭据版本冲突" aria-live="polite"><p>编辑基于 v{credentialEdit.version}、代次 {credentialEdit.generation}；当前 v{v.version}、代次 {v.generation}、{v.credential_present?"已配置":"未配置"}。凭据输入已保留；本次尚未替换服务器凭据。</p><button type="button" disabled={busy} onClick={()=>setCredentialEdits(old=>({...old,[v.id]:{...credentialEdit,version:v.version,generation:v.generation,readError:undefined}}))}>使用当前版本，保留凭据输入</button><button type="button" disabled={busy} onClick={e=>{e.currentTarget.closest("form")?.reset();setCredentialEdits(old=>{const next={...old};delete next[v.id];return next})}}>放弃凭据修改</button></div>}
+ {credentialEdit?.readError&&<p role="alert" className="error">{credentialEdit.readError}；凭据输入已保留。</p>}
+ </form></details>}
+ <button className="text" disabled={busy||!!v.source_ids.length} onClick={()=>void run(v.id,()=>api(`accounts/${v.id}`,"DELETE",{version:v.version}))}>删除未引用账号</button></article>})}
+ </section>
+}

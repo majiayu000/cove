@@ -1,0 +1,513 @@
+{
+  "kind": "synthetic_document_examples",
+  "product_or_client_tests_executed": false,
+  "template_origin": "http://127.0.0.1:5569 is a sample; render the actual configured origin",
+  "configurations": [
+    {
+      "id": "C01",
+      "client": "codex",
+      "format": "toml",
+      "path": "${SELECTED_CODEX_HOME}/config.toml",
+      "content": "model = \"cove-model\"\nmodel_provider = \"cove\"\n[model_providers.cove]\nname = \"Cove\"\nbase_url = \"http://127.0.0.1:5569/v1\"\nwire_api = \"responses\"\nenv_key = \"COVE_API_KEY\"\n",
+      "apply_mode": "file"
+    },
+    {
+      "id": "C02",
+      "client": "claude-code",
+      "format": "json",
+      "path": "${PROJECT}/.claude/settings.local.json",
+      "content": "{\"model\": \"cove-model\", \"env\": {\"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:5569\"}}",
+      "apply_mode": "file",
+      "required_process_env": [
+        "ANTHROPIC_AUTH_TOKEN"
+      ]
+    },
+    {
+      "id": "C03",
+      "client": "opencode",
+      "format": "json",
+      "path": "${PROJECT}/opencode.json",
+      "content": "{\"$schema\": \"https://opencode.ai/config.json\", \"model\": \"cove/cove-model\", \"provider\": {\"cove\": {\"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"Cove\", \"options\": {\"baseURL\": \"http://127.0.0.1:5569/v1\", \"apiKey\": \"{env:COVE_API_KEY}\"}, \"models\": {\"cove-model\": {\"name\": \"Cove model\"}}}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "C04",
+      "client": "gemini-cli",
+      "format": "json",
+      "path": "${PROJECT}/.gemini/settings.json",
+      "content": "{\"security\": {\"auth\": {\"selectedType\": \"gemini-api-key\"}}, \"model\": {\"name\": \"cove-model\"}}",
+      "apply_mode": "file",
+      "required_process_env": [
+        "GOOGLE_GEMINI_BASE_URL",
+        "GOOGLE_GENAI_API_VERSION",
+        "GEMINI_API_KEY"
+      ]
+    },
+    {
+      "id": "C05",
+      "client": "continue",
+      "format": "yaml",
+      "path": "${USER_HOME}/.continue/config.yaml",
+      "content": "name: Cove local\nversion: 1.0.0\nschema: v1\nmodels:\n  - name: Cove\n    provider: openai\n    model: cove-model\n    apiBase: http://127.0.0.1:5569/v1\n    apiKey: ${{ secrets.COVE_API_KEY }}\n    roles: [chat, edit, apply]\n",
+      "apply_mode": "file"
+    },
+    {
+      "id": "C06",
+      "client": "cline",
+      "format": "json",
+      "path": "official settings UI",
+      "content": "{\"providerLabel\": \"OpenAI Compatible\", \"baseURL\": \"http://127.0.0.1:5569/v1\", \"model\": \"cove-model\", \"scope\": [\"plan\", \"act\"], \"secretDelivery\": \"official UI\"}",
+      "apply_mode": "manual",
+      "expected_apply_status": 422
+    },
+    {
+      "id": "C07",
+      "client": "roo",
+      "format": "json",
+      "path": "official API profile UI",
+      "content": "{\"profile\": \"Cove\", \"providerLabel\": \"OpenAI Compatible\", \"baseURL\": \"http://127.0.0.1:5569/v1\", \"model\": \"cove-model\", \"secretDelivery\": \"official UI\"}",
+      "apply_mode": "manual",
+      "expected_apply_status": 422
+    },
+    {
+      "id": "C08",
+      "client": "cursor",
+      "format": "json",
+      "path": "no verified model settings file",
+      "content": "{\"installed_version\": \"3.20.21\", \"reason\": \"version-specific model write schema not verified\"}",
+      "apply_mode": "blocked",
+      "expected_apply_status": 422
+    },
+    {
+      "id": "M01",
+      "client": "codex",
+      "format": "toml",
+      "path": "${SELECTED_CODEX_HOME}/config.toml",
+      "content": "[mcp_servers.cove_example]\nurl = \"https://mcp.example.invalid/mcp\"\nbearer_token_env_var = \"EXAMPLE_MCP_TOKEN\"\n",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M02",
+      "client": "claude-code",
+      "format": "json",
+      "path": "${PROJECT}/.mcp.json",
+      "content": "{\"mcpServers\": {\"cove_example\": {\"type\": \"http\", \"url\": \"https://mcp.example.invalid/mcp\"}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M03",
+      "client": "opencode",
+      "format": "json",
+      "path": "${PROJECT}/opencode.json",
+      "content": "{\"mcp\": {\"cove_example\": {\"type\": \"local\", \"command\": [\"node\", \"./tools/synthetic-mcp.js\"], \"enabled\": true}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M04",
+      "client": "gemini-cli",
+      "format": "json",
+      "path": "${PROJECT}/.gemini/settings.json",
+      "content": "{\"mcpServers\": {\"cove_example\": {\"httpUrl\": \"https://mcp.example.invalid/mcp\"}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M05",
+      "client": "cline",
+      "format": "json",
+      "path": "${USER_SELECTED_MCP_SETTINGS_FILE}",
+      "content": "{\"mcpServers\": {\"cove_example\": {\"command\": \"node\", \"args\": [\"./tools/synthetic-mcp.js\"], \"disabled\": false}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M06",
+      "client": "roo",
+      "format": "json",
+      "path": "${PROJECT}/.roo/mcp.json",
+      "content": "{\"mcpServers\": {\"cove_example\": {\"type\": \"stdio\", \"command\": \"node\", \"args\": [\"./tools/synthetic-mcp.js\"], \"disabled\": false}}}",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M07",
+      "client": "continue",
+      "format": "yaml",
+      "path": "${USER_HOME}/.continue/config.yaml",
+      "content": "name: Cove local\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: cove_example\n    type: streamable-http\n    url: https://mcp.example.invalid/mcp\n",
+      "apply_mode": "file"
+    },
+    {
+      "id": "M08",
+      "client": "cursor",
+      "format": "json",
+      "path": "${PROJECT}/.cursor/mcp.json",
+      "content": "{\"mcpServers\": {\"cove_example\": {\"url\": \"https://mcp.example.invalid/mcp\", \"headers\": {\"Authorization\": \"Bearer ${env:EXAMPLE_MCP_TOKEN}\"}}}}",
+      "apply_mode": "file"
+    }
+  ],
+  "three_way_restore_examples": [
+    {
+      "id": "F01",
+      "before": {
+        "model": "old",
+        "theme": "dark"
+      },
+      "ours": {
+        "model": "cove",
+        "theme": "dark"
+      },
+      "current": {
+        "model": "cove",
+        "theme": "light"
+      },
+      "expected": {
+        "model": "old",
+        "theme": "light"
+      },
+      "conflicts": []
+    },
+    {
+      "id": "F02",
+      "before": {
+        "model": "old"
+      },
+      "ours": {
+        "model": "cove"
+      },
+      "current": {
+        "model": "user-choice"
+      },
+      "expected": {
+        "model": "user-choice"
+      },
+      "conflicts": [
+        "model"
+      ]
+    },
+    {
+      "id": "F03",
+      "before": {},
+      "ours": {
+        "model": "cove"
+      },
+      "current": {
+        "model": "cove",
+        "theme": "light"
+      },
+      "expected": {
+        "theme": "light"
+      },
+      "conflicts": []
+    },
+    {
+      "id": "F04",
+      "before": {
+        "model": "old"
+      },
+      "ours": {},
+      "current": {},
+      "expected": {
+        "model": "old"
+      },
+      "conflicts": []
+    },
+    {
+      "id": "F05",
+      "before": {
+        "model": "old"
+      },
+      "ours": {
+        "model": "cove"
+      },
+      "current": {},
+      "expected": {},
+      "conflicts": [
+        "model"
+      ]
+    },
+    {
+      "id": "F06",
+      "before": {
+        "mcp.serverA.url": "https://old.invalid"
+      },
+      "ours": {
+        "mcp.serverA.url": "https://new.invalid"
+      },
+      "current": {
+        "mcp.serverA.url": "https://new.invalid",
+        "mcp.serverB.url": "https://user.invalid"
+      },
+      "expected": {
+        "mcp.serverA.url": "https://old.invalid",
+        "mcp.serverB.url": "https://user.invalid"
+      },
+      "conflicts": []
+    }
+  ],
+  "wire_examples": [
+    {
+      "id": "Q01",
+      "provider": "codex",
+      "response": {
+        "rate_limit": {
+          "primary_window": {
+            "used_percent": 75,
+            "limit_window_seconds": 18000,
+            "reset_after_seconds": 3600,
+            "reset_at": 1790740800
+          },
+          "secondary_window": null
+        }
+      },
+      "expected": {
+        "primary_remaining_percent": 25,
+        "window_seconds": 18000,
+        "secondary": "unknown"
+      }
+    },
+    {
+      "id": "Q02",
+      "provider": "codex",
+      "response": {
+        "rate_limit": null
+      },
+      "expected": {
+        "quota": "unknown"
+      }
+    },
+    {
+      "id": "Q03",
+      "provider": "gemini-cli",
+      "response": {
+        "buckets": [
+          {
+            "remainingFraction": 0.25,
+            "remainingAmount": "25",
+            "resetTime": "2026-09-30T12:00:00Z",
+            "tokenType": "REQUESTS",
+            "modelId": "synthetic-model"
+          }
+        ]
+      },
+      "expected": {
+        "remaining_percent": 25,
+        "remaining_amount": "25",
+        "unit": "provider tokenType; no inference from name"
+      }
+    },
+    {
+      "id": "Q04",
+      "provider": "gemini-cli",
+      "response": {
+        "buckets": [
+          {
+            "modelId": "synthetic-model"
+          }
+        ]
+      },
+      "expected": {
+        "remaining": "unknown",
+        "reset_at": null
+      }
+    },
+    {
+      "id": "A01",
+      "provider": "github",
+      "response": {
+        "device_code": "SYNTHETIC_DEVICE_CODE",
+        "user_code": "DEMO-CODE",
+        "verification_uri": "https://github.com/login/device",
+        "expires_in": 900,
+        "interval": 5
+      },
+      "expected": {
+        "poll_interval_seconds": 5,
+        "secret_field": "device_code"
+      }
+    },
+    {
+      "id": "A02",
+      "provider": "qwen-historical",
+      "response": {
+        "access_token": "SYNTHETIC_NOT_A_CREDENTIAL",
+        "refresh_token": "SYNTHETIC_NOT_A_CREDENTIAL",
+        "expires_in": 3600,
+        "token_type": "Bearer",
+        "resource_url": "https://unapproved.example.invalid/v1"
+      },
+      "expected": {
+        "state": "blocked",
+        "reason": "unapproved resource origin and discontinued new OAuth entry"
+      }
+    },
+    {
+      "id": "W01",
+      "provider": "openai-api",
+      "request": {
+        "type": "response.create",
+        "stream_id": "laneA",
+        "model": "synthetic-model",
+        "store": false,
+        "input": "synthetic request"
+      },
+      "expected": {
+        "lane": "laneA",
+        "dispatches_at_most": 1
+      }
+    },
+    {
+      "id": "W02",
+      "provider": "codex-subscription",
+      "request": {
+        "type": "response.create",
+        "stream_id": "second",
+        "model": "synthetic-model",
+        "input": "synthetic request"
+      },
+      "setup": "one active default lane; named lanes unverified",
+      "expected": {
+        "dispatches": 0,
+        "error_status": 422
+      }
+    },
+    {
+      "id": "K01",
+      "provider": "openai-api",
+      "response": {
+        "id": "cmp_synthetic",
+        "object": "response.compaction",
+        "created_at": 1790726400,
+        "output": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "synthetic history"
+              }
+            ]
+          },
+          {
+            "type": "compaction",
+            "id": "comp_synthetic",
+            "encrypted_content": "SYNTHETIC_OPAQUE_NOT_VALID_UPSTREAM"
+          }
+        ]
+      },
+      "expected": {
+        "preserve_entire_output": true,
+        "real_request_allowed": false
+      }
+    },
+    {
+      "id": "K02",
+      "provider": "codex-subscription",
+      "request": {
+        "model": "synthetic-model",
+        "input": []
+      },
+      "setup": "POST /responses/compact bound to Codex0.158.0 streamed-compaction adapter; endpoint unsupported",
+      "expected": {
+        "dispatches": 0,
+        "error_status": 422,
+        "reason": "use native Responses compaction_trigger for this adapter"
+      }
+    },
+    {
+      "id": "K03",
+      "provider": "codex-0.158.0",
+      "request": {
+        "model": "synthetic-model",
+        "stream": true,
+        "store": false,
+        "input": [
+          {
+            "role": "user",
+            "content": "synthetic history"
+          },
+          {
+            "type": "compaction_trigger"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "response.output_item.done",
+          "item": {
+            "type": "compaction",
+            "encrypted_content": "SYNTHETIC_OPAQUE_NOT_VALID_UPSTREAM"
+          }
+        },
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_synthetic",
+            "status": "completed",
+            "usage": {
+              "input_tokens": 100,
+              "output_tokens": 20,
+              "total_tokens": 120
+            }
+          }
+        }
+      ],
+      "expected": {
+        "compaction_items": 1,
+        "terminal_required": true,
+        "attempts": 1,
+        "product_test_executed": false
+      }
+    },
+    {
+      "id": "K04",
+      "provider": "codex-0.158.0",
+      "events": [
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_synthetic",
+            "status": "completed"
+          }
+        }
+      ],
+      "expected": {
+        "compaction_items": 0,
+        "result": "protocol failure; no replay"
+      }
+    },
+    {
+      "id": "K05",
+      "provider": "codex-0.158.0",
+      "events": [
+        {
+          "type": "response.output_item.done",
+          "item": {
+            "type": "compaction",
+            "encrypted_content": "SYNTHETIC_1"
+          }
+        },
+        {
+          "type": "response.output_item.done",
+          "item": {
+            "type": "compaction",
+            "encrypted_content": "SYNTHETIC_2"
+          }
+        }
+      ],
+      "expected": {
+        "compaction_items": 2,
+        "result": "protocol failure; no replay"
+      }
+    }
+  ],
+  "skill_paths": {
+    "codex": ".agents/skills/{name}/SKILL.md",
+    "claude-code": ".claude/skills/{name}/SKILL.md",
+    "opencode": ".opencode/skills/{name}/SKILL.md",
+    "gemini-cli": ".gemini/skills/{name}/SKILL.md",
+    "cline": ".cline/skills/{name}/SKILL.md",
+    "roo": ".roo/skills/{name}/SKILL.md",
+    "cursor": ".cursor/skills/{name}/SKILL.md",
+    "continue": ".continue/skills/{name}/SKILL.md"
+  },
+  "skill_example": "---\nname: cove-synthetic\ndescription: Synthetic document fixture, not installed\n---\nOnly a fixture. No commands are executed.\n"
+}

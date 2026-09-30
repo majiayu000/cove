@@ -1,0 +1,46 @@
+old_id	old_requirement	disposition	target_ids	new_contract_and_reason	validation
+A01	干净启动固定端口与管理边界	修改	R001,R003,R009	固定端口保留；票据必需改为用户已确定的本机自动会话	TestLocalAutomaticSessionBoundaries;E08
+A02	外站Origin和无session不能写	保留	R004	只有精确Origin的session端点可自动发会话；普通管理写仍需session	TestContractManagementBearerIsolation
+A03	秘密sentinel不进入DB日志诊断	保留	R010,R081	扩展到代理秘密和配置备份；凭据仍只进私有存储	TestAdminBoundaryAndSecretIsolation
+A04	未测试来源不称已验证	保留并扩展	R021,R024,R025,R030	按模型/协议/feature/版本验证而非来源一个绿灯	TestSpecCapabilities（新增）
+A05	JSON正确用量和认证隔离	保留并扩展	R041,R042,R043,R061	三协议与多provider均需实际schema与真实usage合同	E02;TestProtocolEntrySharesExecution
+A06	SSE任意分块UTF8多行未知事件	保留	R046	原生未知可透传；跨协议无法理解的语义明确失败	TestCompatFragmentedStreamsAndToolArguments
+A07	真实函数工具循环	保留	R026,R077,R078	必须客户端执行并回传结果；看到tool JSON不通过	E01;E02
+A08	opaque响应与推理历史	保留并扩展	R027,R048	原生完整回传；跨provider签名不可伪造	TestSpecOpaqueState（新增）
+A09	compact和WS客户端需求	修改	R077,R096	从只调查扩为P2目标；实际目标客户端必需时提前P0	E09
+A10	上游错误RetryAfter且不切来源	修改	R050,R053,R054	保留错误；仅已证明未执行且无输出的分支有限切换	E05;TestSpecAttemptSafety（新增）
+A11	输出前网络超时不模糊重放	保留并细化	R049,R054	无首字不证明未提交；只有transport或provider证实安全才重试	E05
+A12	输出后或工具流中断不重试不伪成功	保留	R046,R054	任何语义输出后禁止重新生成；终态须真实	TestCompatErrorsNoRetryAndNoSuccessfulTerminator
+A13	取消与上游计费未知	保留	R049,R064	取消解除本地资源；保留已知用量和未知预留	TestContractCancellationWakesBlockedWriter;E06
+A14	同来源续接	保留	R056	还需同Key/账号generation/模型及provider支持	TestContinuationIsolationAndURLGeneration
+A15	跨来源账号Key续接409	保留	R056,R057	状态绑定优先于pool和affinity，不跨账号尝试资源ID	TestBindingsRejectAnotherKeyAndSource
+A16	过期外部responseID拒绝	保留	R056,R069	未登记资源不猜归属；过期和保留清理有用户提示	TestRetentionDeletesBindings
+A17	停用撤销与在途请求	保留并明确	R011,R035,R049	默认阻止新请求；立即终止是独立操作	TestCancellationDisableRevokeAndDelete
+A18	被引用来源删除409	保留并扩展	R011,R051	除了有效Key还检查route/account运行引用，保留历史记录	TestSpecRouting（新增）
+A19	未知部分usage	保留	R047,R061	wire估算另记；账务unknown不变成0	TestSpecWireUsage（新增）
+A20	缓存推理不重复计多币种快照	保留并扩展	R029,R062	逐模型、音频图像缓存创建等维度各自included_in	TestUsageDecimalsUnknownAndCurrencies
+A21	客户端重发是独立记录	保留并明确	R055	客户端重复HTTP请求仍是不同request；应用重试是同request多attempt	TestClientResendRecordsSeparateAttempts
+A22	崩溃重启interrupted不重放	保留并扩展	R006,R064	队列不重发；未知预算保留待确认	TestCrashRecoveryAndStorageFailure;E06
+A23	存储失败前不派发后不重放	保留	R006,R055,R064	失败停止admission且不假称记账完整	TestPostDispatchStorageFailureStopsAdmission
+A24	登录取消双击localhost端口	保留并扩展	R014,R015,R018	多账号操作复用/冲突可见；device flow独立取消和expiry	TestBrowserOAuthPKCEStateAndSave
+A25	真实订阅而非APIKey代替	保留	R014,R026,R077	指定用户独立授权；保留provider与模型资格证据	E01
+A26	到期刷新退出不碰日常认证	保留	R016,R017,R076	共享account owner；配置恢复保留官方登录	E01;E07
+A27	登录健康额度独立	保留并扩展	R019,R024,R066	增加stale/窗口单位和原始观测来源	E04
+A28	用户改客户端配置后不覆盖	修改	R074,R075,R076	从手动指南升级成preview/hash校验/三方恢复；仍保留新修改	E07
+A29	恢复直连不再经过网关	保留	R076	验证客户端实效和Cove无该请求，不仅检查文件内容	E07
+A30	8并发长流内存与取消	保留并扩展	R038,R058,R087	多级并发/队列同样有界；增加30分钟基准证据	TestEightStreamsCapacityAndCancellation;BenchmarkSpecGateway（新增）
+A31	备份恢复凭据缺失重登	保留并扩展	R082	一致快照、预览、独立目录验证，不能直接漏WAL复制活动DB	E08
+A32	跨host重定向不泄认证	保留	R020,R050	适用于授权/额度/模型/推理与资源下载	TestRedirectAndLocalRejection
+A33	写新secret后DB失败补偿	保留	R017,R081	随机ref、DB提交前不发布、旧值清理失败可见	TestCredentialTransactionRollback
+A34	能力限制派发前拒绝	修改	R024,R044,R045	用户明确开启的Codex参数调整可通过并披露；其余限制仍前置拒绝	TestSpecCodexMessages（新增）;E03
+A35	刷新并发旋转未知晚回调无重放	保留并扩展	R013,R016,R017	锁从source提升为共享account owner；模糊旋转不能自动再用旧token	TestContractSharedRefreshSurvivesWaiterCancellation
+A36	Codex拒非流式storetrue状态ID	修改	R041,R044,R056	非流式可有界聚合；storetrue/资源续接只有实际支持才开；不随max_tokens开关放开	E02;E09
+A37	管理测试计量	保留	R068	文本/工具/续接测试共用执行链且明确用途和费用	TestAdminTestsMeteredAndContinuationVerified
+A38	endpoint变化绑定失效	保留并扩展	R030,R056	账号身份和adapter语义变化同样处理验证/资源generation	TestContinuationIsolationAndURLGeneration
+A39	不同端口新标签管理session隔离	修改	R003,R004	新标签可自动取session；保持origin隔离和redirect错误；取消旧密码必需条件	TestLocalAutomaticSessionBoundaries
+A40	并发凭据文件更新fsync不确定	保留	R081	单secret文件writer，未确认持久化不发布缓存	TestFileSecretsConcurrentUpdates
+A41	持久退出与崩溃点	保留	R017	清除DBref先于secret清理；清理失败不等于仍登录	TestContractLogoutDurableBeforeCleanup
+A42	旧测试额度结果不能刷绿新账号	保留并扩展	R025,R030,R066	所有异步发现/配额/验证结果检查account/source版本generation	TestContractOldResultDoesNotVerifyChangedSource;E04
+A43	读body前准入慢上传边界	保留	R038,R058,R087	未拿global槽位不读大正文；排队也有独立体积和时间约束	TestContractAdmissionBeforeBody
+A44	上游完成下游失败观察超限独立	保留	R046,R061,R080	三维状态保留；兼容转换超限不能盲传	TestContractDeliveryFailureKeepsUpstreamUsage;TestContractOversizeTerminalIsUnverified
+A45	Go隐藏重放零字节复用连接背压	保留并细化	R049,R054,R088	禁止transport自动重放，应用唯一retry owner；可证未提交分支单独测试	TestContractPostBodiesNotReplayable;TestContractBackpressureNotUpstreamIdle;E05

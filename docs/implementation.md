@@ -1,0 +1,107 @@
+# Cove v1.2 实施与验收记录
+
+这是当前源码的实施快照，基线为[完整 Spec v1.2](spec/01-COVE-COMPLETE-SPEC.md)。[104 项实施台账](implementation-readiness.tsv)是唯一逐项记录：设计状态取自设计合同，实现状态按当前代码和已完成检查重新核对，没有沿用规范中的旧 `current_status`。当前是本地开发预览，不能标记“104 项全部完成”。
+
+已实现本机账号与来源、模型、API Key、协议转换、路由、用量与软预算、记录、客户端文件配置、备份、受控恢复和更新，以及可观测性与通知。高级协议按来源及模型能力开放；未知资格、额度、价格或计费上界保持未知并给出拒绝原因。严格预算已实现一个限定成功路径：官方 OpenAI Responses、无状态文本/客户端函数工具、明确 default 服务层、正 max_output_tokens 和完整用户配置 token 价格。通过官方输入计数接口取得输入量，按输入量和输出上限向上取整预留；这是本地已知计费规则下的准入上限，真实提供方成功验收仍待执行。其他来源或操作没有可信完整上界时拒绝。请求只在可证未发送的拨号失败时有限重选；未知提交、429、5xx、超时和流中断不会重放。
+
+先前审查修复轮使用独立临时目录与合成凭据、回环上游验证，没有读取日常客户端凭据或调用真实收费模型。本次完整目标另执行了可清理的当前用户服务验收，见下文；没有停止用户已有实例。当前数据库为 schema v2，不提供旧数据迁移或回填。凭据受当前用户目录和文件权限保护，默认记录与导出不保存提示词、响应正文、工具内容或凭据。完整备份使用 age 口令加密并校验一致快照和秘密闭包；元数据备份需要重新补齐认证。恢复和更新先关闭新生成准入，验证实际进程身份和初始化健康后再激活；失败回退只适用于已定义的同 schema 流程。
+
+## “全部完成”目标的当前推进（2026-10-01）
+
+用户已指定先完成 Mac 验收，Linux 使用 Docker，Windows 使用另一台电脑。当前目标持续推进；没有把外部条件不足的项目改成完成。除原审查三项之外，本轮还修复：TPM 的 Retry-After 等到足够容量释放；普通 API 来源编辑不再误算云端点；launchd 安装先准备0700数据/日志目录；来源、账号、模型发现、Key和预算不冻结无关对象；路由/模型变更刷新父级数据，Key权限表单保留编辑版本，冲突由用户明确选择重提；来源弹窗使用原生dialog处理键盘、Esc和焦点返回；Anthropic beta仅在原生Messages及模型明确声明 `anthropic_beta:<tag>` 时传递，转换和未声明组合仍返回422。
+
+前一冻结构建 `7d5d9ba06cdf…` 已完成 Mac 297 个顶层测试、537 个含子用例、零跳过；SDK 34/34、网页、生命周期和当前用户 launchd 均通过。同包 1800 秒、8 流、100 万记录性能五项门槛通过：附加 TTFT P95 1.015ms、查询 P95 1.169ms、RSS 增长 7056KiB、取消释放 0.0098 秒，见[前一包汇总](../test-results/goal-phase2-final-checks.json)与[性能报告](../test-results/goal-phase2-performance.json)。Linux arm64 同源码原生 CGO 构建、完整 race、静态检查、生命周期和未安装 Go/Node/GCC 的独立 Debian 容器运行通过，见[Linux 汇总](../test-results/goal-linux-final-checks.json)。Linux 三项跳过是 Darwin 实际更新助手和容器未安装的两种 CLI；普通容器本身没有证明 systemd 用户会话。后续新增独立 systemd 容器，实际用户管理器验收见下文。此前并发 401 测试缺少屏障，已修复测试并在 Mac/Linux 各连续 20 次 race 通过；生产刷新代码未变。
+
+本轮新增严格预算成功路径，见 [strict_budget.go](../internal/app/strict_budget.go)和[定向 race](../test-results/goal-strict-final.log)。计数网络和正文读取释放全局锁，计数后复核 Key、模型、来源、价格、预算版本、路由和并发；共享总期限，失败或变更不派发生成。测试覆盖计数、原子预留、实际结算、未知用量保留、8 请求竞争、纯路由预览、函数工具、管理员测试和安全未发送重选。准入费用向上取整到账本精度，并持久化输入计数、输出上限及准入依据。重选的 TPM 使用官方计数和输出上限，在最终准入处检查一次，避免先用 tokenizer 估算误拒绝。另修复同账号第二来源重选把本请求占有的并发槽误算为其他请求的问题，仅凭服务器登记的运行请求和不可变账号记录扣除自己的槽。
+
+[网页报告](../test-results/local-entry-acceptance.json)覆盖来源/账号/Key/预算/路由等已声明案例，包括独立慢操作及重复点击保护、轮换一次明文、移动宽度和会话存储失败；剪贴板和模型上游使用替身。Mac 服务脚本使用可清理的实际当前用户 launchd，检查安装不启动、PID/端口/build、中文空格路径、无 Go/Node 的系统 PATH、权限、冲突、停启和卸载保留数据。各模块完整键盘、脏表单、CAS 差异和跨平台桌面仍按台账保留。Vite 7.3.6 的[本次 npm 审计](../test-results/goal-npm-audit-after.json)零项，不能保证未来公告。额度提醒附件与主 Spec 已统一为剩余 <=10%。
+
+Linux 实际 systemd 用户服务首次发现 `WorkingDirectory` 引号被当作路径字符，含中文空格安装失败。服务已使用绝对 binary/config/data 参数，删除多余的 WorkingDirectory 设置后，[真实用户管理器源码迭代报告](../test-results/goal-linux-service-source-iteration.json)十项通过：安装不启动、default.target 启用、PID/端口/build、中文空格路径/私有权限、无 Go/Node/GCC 的网页、用户管理器重启自动启动、冲突保护、停启、卸载保留数据。该报告为修复验证，不代替最终包；独立 Docker PID1 是 systemd 257，用户 UID1000，本机原有服务和其他容器未改动。另将真实更新助手测试扩展到 Linux 原生子进程，使用对应平台包 fixture；[Linux 定向 race](../test-results/goal-linux-real-update-source.log)已验证关闭准入、健康核验和激活，管理器查询仍是替身，真实 systemd 生命周期由前述独立实验验证。
+
+UI 状态收尾已复现三项此前缺口：无关预算刷新覆盖未保存上限（31→32）、慢诊断禁用配置导出、一个后台任务取消禁用其他任务。修复前分别见[预算](../test-results/goal-ui-budget-before.log)、[运维](../test-results/goal-ui-operations-before.log)、[资源](../test-results/goal-ui-resource-before.log)。预算保留编辑版本/输入，409读取当前值并显示差异，只有明确选择当前版本后重新提交；运维/任务使用各自等待和重复提交保护，旧轮询与旧创建响应不覆盖较新状态。四项专项在[源码迭代浏览器报告](../test-results/goal-ui-state-browser.json)通过；任务与慢请求部分管理回复使用替身，只证明UI状态，不代替后台提供方实验。另新增375/390/768/1280和十页字段标签检查，修复768px Key行按钮溢出、一个label包两个权限控件以及缺少名称的Key/用量控件；[本轮最终网页报告](../test-results/goal-ui-final-browser.json)未产生或失败时不计通过。后续在旧包再次复现[账号名称草稿丢失](../test-results/goal-ui-account-before-retest.json)与[Key限额草稿丢失](../test-results/goal-ui-key-before.json)。账号名称/凭据、Key权限、模型元数据和路由配置现保留独立编辑版本/输入，409读取当前值并展示差异，只有用户明确选择当前版本后重提；放弃修改读取当前值。凭据差异只显示版本、代次和配置状态，成功后清空输入。四类实体专项先通过，整套脚本在新增辅助模型引起的导入fixture数量断言失败，修正fixture隔离后[源码迭代整套网页报告](../test-results/goal-ui-entities-browser-final.json)通过；较早失败报告保留。模型元数据保存后价格失败会明确显示已完成部分，并保留输入和原错误。[本轮包网页报告](../test-results/goal-entities-final-browser.json)需核对实际结果与BuildID。来源/设置等表单、完整键盘、错误字段关联与200%缩放仍按R072保留。后续在该包[复现客户端全局等待](../test-results/goal-ui-client-focused-before-corrected.log)：A恢复预览暂停，B记录被禁用。客户端历史/配置/检测现使用独立等待、同步重复提交保护及分别的选择版本，旧恢复预览不能覆盖新记录；错误仍保留原消息。该UI修改的[源码迭代两项专项](../test-results/goal-ui-client-focused-source.json)通过：A慢恢复不阻塞B、旧回复不覆盖新预览，慢检测不阻塞配置预览，重复submit仅派发一次。初次测试选错导航/下拉框的失败日志保留。[本轮整套网页](../test-results/goal-ui-client-final-browser.json)及[同包汇总](../test-results/goal-ui-client-final-checks.json)需读取实际结果，未产生或失败不计通过；管理回复使用明确替身，不涉及实际客户端文件。
+
+Windows 接入已从此前Codex记录恢复，实际连接为 `Administrator@100.81.107.120`，只在进程内传入认证。[环境清单](../test-results/goal-windows-current-inventory.json)确认Windows 11专业版64位；starlight实际为Darwin，不能作为Windows证据。原有客户端配置与任务不改动，实机验收结果未产生或失败时不计通过。
+
+逐模型文本验证还发现一个独立假阳性：订阅来源的空完成事件和只有函数参数的流均可被标记文本通过。[修复前日志](../test-results/goal-model-text-before.log)覆盖三协议的JSON/SSE；现从有界验证输出读取实际文本，不把工具参数或成功传输当作文本。上游请求成功、usage和逐项失败结果的合同保持原样。[定向race](../test-results/goal-model-text-after.log)通过，属于源码迭代，尚需新冻结包真实验证。
+
+同一冻结包的最新结果由[汇总报告](../test-results/goal-final-checks.json)记录。新增严格预算改动需要新包的完整检查，前一包的绿色结果不会用于证明新包。报告未产生、命令非零、BuildID/hash 不匹配或门槛未全通过时不计验收；源码迭代证据不代替同包检查。
+
+独立5572实例已完成本人Cove OAuth，实际目录返回9个模型；在网页启用gpt-5.6-luna并创建Key，一次性明文刷新后消失。`c9c12bcf5ce7…` 的[真实主流程首次报告](../test-results/goal-entities-real-live-retest.json)中，Codex CLI 0.159.2实际执行本地printf工具并完成最终答复，5条请求的实际usage与汇总一致；三协议专项虽然均返回200，但未通过工具断言，整份报告仍失败。不能将200视作工具验收通过。
+
+[真实流诊断](../test-results/goal-real-tool-stream-diagnostic.json)确认完整add调用在 `response.output_item.done` 中，正式完成事件的output为空数组。转换器与验收客户端已补读完成输出项，仍要求正式终态，并限制累计大小、索引、重复完成及终态/已发送内容冲突；原生Responses线数据保持直传。[官方Codex解析器](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/sse/responses.rs)分别消费完成项与完成事件。定向检查以[实际日志](../test-results/goal-real-output-focused.log)为准；`7cc37314a390…` [修复包真实报告](../test-results/goal-real-output-live.json)三协议两轮、网页Key及实际Codex CLI均通过，8条成功请求的15287输入/359输出token与汇总相符；订阅费用保持unknown。此包34项官方SDK合成、38项网页、完整race（首次两CLI被错误环境变量跳过，单独正确启用后两项补测通过）见[同包汇总](../test-results/goal-real-output-checks.json)。该包之后的UI修改属于下一源码迭代，不能沿用其BuildID宣称新包已验收。较早的测试fixture错误与失败日志保留。真实报告继续使用 `scripts/verify-live.mjs`；未登录或空cases不算通过。Windows连接方式、自有OAuth注册和其余供应商成功合同尚未提供；D01-D03 与 E01-E10、严格预算真实提供方实验、其余模块专项验收仍按台账保留。
+
+## 本次审查修复与同一构建复验（2026-09-30）
+
+已复现并修复原审查的三个问题，修复前失败见 [review-regression-before.log](../test-results/review-regression-before.log)，回归见 [review-regression-after.log](../test-results/review-regression-after.log)：
+
+- 固定来源的原生 Chat/Messages 派发前读取模型的启用状态；停用后上游调用次数不再增加。Responses 保留原有请求验证错误语义。
+- Key 管理请求读取正文时释放生成准入锁；读完后重新加载 Key 并执行 version CAS，慢上传不会阻塞无关模型调用，也不会覆盖期间的新修改。
+- 轮换保留原 Key 的预算作用域，所有代次共用原预算周期与账本；已结算金额、在途预留和待核对金额保留。显式关联和独立创建的 Key 预算都跟随轮换，旧请求仍可结算，其他 Key 不能关联。网页说明同一预算的共享关系。
+
+本次的实际检查退出状态、源码 BuildID、二进制与开发包 hash，以及报告是否匹配同一构建，以 [review-final-checks.json](../test-results/review-final-checks.json)为准。完整 Go TCP/race 测试、静态检查、34 项官方 SDK 合成案例、隔离生命周期与网页业务复验分别记录在 [race JSON](../test-results/review-full-race.json)、[check log](../test-results/review-check.log)、[SDK](../test-results/review-sdk.json)、[runtime](../test-results/runtime-acceptance.json)和[浏览器](../test-results/local-entry-acceptance.json)。浏览器覆盖网页创建专属预算 Key、轮换一次明文、验证新 Key 的模型目录认证后撤销旧 Key、隐藏/刷新不可找回、路由/别名预览、预算修改、配置导入/替换与移动宽度；不把模型目录认证算作真实模型调用。
+
+真实订阅验收使用独立空数据目录，不读取日常 Codex 凭据。流程为本实例 OAuth 登录 → 实际模型目录 → 网页创建 Key → 三协议实际工具结果回传与最终回答 → Codex CLI 工具 → wire usage、请求与汇总对账。必须由账号本人完成登录；[review-live.json](../test-results/review-live.json)记录实际状态，`passed=false` 或空 cases 不算验收通过。脚本失败仍输出报告，不输出凭据、Key 明文、提示词或响应正文，创建的验收 Key 在退出时撤销：
+
+```sh
+node scripts/verify-live.mjs /absolute/isolated/config.json test-results/review-live.json
+```
+
+本次修复不闭合九条外部合同，不证明严格费用硬封顶，也不重用早期性能数据为新包背书。仍为 macOS arm64 开发预览，不能标记“Spec v1.2 全部完成”。下文是此前证据与当时限制的归档；最新结果优先读取上述本次报告。
+
+## 此前已完成的检查与边界
+
+| 检查 | 当前证据 | 能证明的范围与剩余 |
+| --- | --- | --- |
+| Go race | [v12-go-race.log](../test-results/v12-go-race.log) | `cmd/gatt 20.155s`、`internal/app 48.964s` 通过。这是 WS、Quota 和后台接入之前的完整基线。最终主目录的 [154个无监听测试](../test-results/v12-final-offline-tests.json) race 通过（internal/app 31.659s）；[最终日志](../test-results/v12-final-offline-race.log)不包含被沙箱阻断的 TCP 测试。 |
+| vet 与构建 | [v12-go-vet.log](../test-results/v12-go-vet.log)、[v12-build.log](../test-results/v12-build.log) | 已完成 `go vet`、前端类型检查/Vite 与嵌入 Go 构建；vet 日志为空，退出成功由本轮执行记录确认。最终主目录 `go vet ./...` 与前端类型检查/Vite 通过，分别见 [final vet](../test-results/v12-final-go-vet.log) 和 [final web build](../test-results/v12-final-web-build.log)。原生二进制、内嵌资产及源码快照由 [build-evidence.json](../bin/build-evidence.json)记录。 |
+| 真实 Codex CLI | [v12-codex-cli.log](../test-results/v12-codex-cli.log)、[codex_client_test.go](../internal/app/codex_client_test.go) | 本轮安装的 Codex 0.158 实际发出两次 HTTP 请求，执行本地合成工具并回传结果。上游为合成服务；真实订阅模型、长会话、并行工具、WS 与 compaction 尚未验收。 |
+| 官方 Python SDK | [v12-sdk.json](../test-results/v12-sdk.json)、[verify-sdk.py](../scripts/verify-sdk.py) | OpenAI 3.22.0、Anthropic 1.9.0、google-genai 2.25.0，34/34 合成案例通过。六方向为 Gemini 与 Responses/Chat/Messages 双向，每方向 JSON、SSE、工具、取消与拒绝语义各一例，另有四协议本地认证错误；不是所有协议组合或真实提供方全部通过。 |
+| 浏览器入口 | [v12-browser.log](../test-results/v12-browser.log)、[local-entry-smoke.mjs](../web/local-entry-smoke.mjs) | 隔离构建的十页入口及 375/390 宽度、直达/刷新/新标签/重启、API Keys 导航与存储故障解释已测。路由/别名/预算/配置替换业务脚本已补，待最终 binary 执行；未执行的表单、键盘和异步交互不计 PASS。 |
+| 生命周期 | [v12-runtime.log](../test-results/v12-runtime.log)、[verify-runtime.py](../scripts/verify-runtime.py) | 新目录、目录锁、强制结束后的 interrupted、缺凭据阻止派发等回环实验已测。该脚本的复制目录恢复不能替代 age 备份和受控启动器全流程。 |
+| age、恢复与更新 | [full_backup_test.go](../internal/app/full_backup_test.go)、[platform_restore_test.go](../cmd/gatt/platform_restore_test.go)、[update_switch_test.go](../cmd/gatt/update_switch_test.go) | Go 测试覆盖错误口令/hash、秘密闭包、一致 generation、恢复日志与失败回退。macOS 真实临时子进程已验证恢复/更新共用的 closed-admission、私有初始化健康、公共 ready503 与激活门禁；服务管理器测试使用模拟 runner。Linux/Windows 实机及干净机器安装未执行。 |
+| 配置转移 | [v12-config-transfer.log](../test-results/v12-config-transfer.log)、[config_transfer_test.go](../internal/app/config_transfer_test.go) | typed 全事务、金融版本 CAS、依赖冲突、明确 skip 关联和选定实体替换已回归。可转移 sources/models/routes/aliases/budgets/prices/runtimeSettings；不导出账号凭据、Key、请求或秘密，不支持猜测 Key 预算依赖。 |
+| Quota | [v12-quota.log](../test-results/v12-quota.log)、[quota_observation_test.go](../internal/app/quota_observation_test.go) | 11.470s focused race 通过；API、共享刷新、代次/CAS、窗口 TTL、历史、派发/路由门禁与通知事实源已接入。测试仍为固定官方合同的假上游，真实提供方额度实验 E04 未执行。 |
+| 可观测性 | [v12-tracing.log](../test-results/v12-tracing.log)、[observability_test.go](../internal/app/observability_test.go) | 合成 OTLP HTTP collector 验证请求/尝试/refresh span、时间关系、隐私和关闭 flush；不代表真实部署 collector 的验收。 |
+| 性能 | [verify-performance.py](../scripts/verify-performance.py)；[performance-v12.json](../test-results/performance-v12.json) | [performance-v12.json](../test-results/performance-v12.json) 已完成：8路/1800秒、100万记录，查询P95 1.325ms、附加TTFT P95 2.325ms、RSS增长6.61MiB、取消释放0.063秒，全部门槛通过。报告的 build_id 精确限定为早期基线，不冒充最终构建。 |
+
+早期 SDK 报告 binary SHA-256 为 `5c8dd60ea72251a2c98374f3d0bf133a2cd2015a02bd27e8cad3c4f00acffa3b`；浏览器证据 BuildID 为 `961a5583ead47d8b9e1888eb8e618b970548e41464e72e6791068ece8656c3bd`。这些属于基线临时构建，原报告保留；最终构建独立记录源码与二进制 hash，不能把基线报告移作最终产物的运行验收。构建日志还报告 npm 依赖审计的一项 high severity，当前没有修复证据。
+
+此前实现轮次的后半程环境从 unrestricted 改为 workspace-write，且 network restricted / approval never。实际 `socket.bind(127.0.0.1:0)` 返回 `Operation not permitted`；依赖新TCP监听的测试因此不能在当前环境重跑，不能记为代码失败或PASS。后台模块已复制到主目录；最终检查没有使用 overlay。[集成定向race](../test-results/v12-final-integration.log)（3.344秒）与154个无监听测试的race通过，覆盖后台验证、配置搬运、账号额度TTL、Key取消归属和Operation初始快照。配置预览也已加文件/模式绑定与迟到响应保护。离线浏览器尝试不使用TCP，但 Chrome 在启动阶段 SIGABRT，未进入页面；[错误记录](../test-results/v12-final-offline-browser.json)的 UI cases 为空，不能记PASS。
+
+## 尚未闭合的合同和验收
+
+设计合同仍有九条外部待补：R012、R018、R019、R028、R066、R074、R075、R079、R097。D01 是额外订阅提供方的 Cove 独立 OAuth 注册/redirect/scope/audience；D02 是提供方模型、额度、私有接口、完整 operation、服务端资源和费用合同；D03 是剩余扩展/闭源客户端及 Cursor 的稳定自动模型配置入口。固定 Codex 0.158 WS/compact 与八客户端 MCP/Skills 的适配设计已定义，真实使用证据仍单独待验。[设计台账](spec/design-readiness.tsv)与[适配附件](spec/03-EXTERNAL-ADAPTER-CONTRACTS.md)保留这些区别。
+
+E01–E10 是账号授权、三协议工具、计数与限制、真实额度、故障切换、预算并发、配置恢复、干净安装、高级协议及更多提供方的运行实验。合成 E05/E06 场景已有局部证据，不能推导整组实验完成。真实授权和 provider wire、Codex 长会话、媒体/资源/后台、各客户端实际加载与直连恢复、各平台安装和服务生命周期仍待执行。WS原生取消修复的早期冻结版本通过19项真实TCP定向race（6.712秒），[证据转录](../test-results/v12-websocket-baseline.json)注明当时工具stdout与源码hash；之后新增显式Key owner的最终TCP复验受限。后台资格验证已接入真实现有Key、共享准入/预算/记录和只读终态观察，7组新测试及最终主目录定向race通过；未知状态、无可核验文本或失败不发布资格。后半程沙箱变更禁止新建本机监听套接字，最终完整网络测试、SDK、浏览器与真实子进程复验受环境限制；此限制与D/E外部合同缺口分别记录。
+
+通知使用完整 Spec §33.2 的默认剩余额度 <=10%；适配附件已统一，没有增加阈值配置。R099 团队充值和远程多租户明确范围外，不计为已实现。用户已选择 MIT，LICENSE 已纳入交付。正式签名尚未提供，当前包仍是本平台开发产物：[macOS arm64开发包](../bin/cove-development-darwin-arm64.tar.gz)、[SHA-256](../bin/cove-development-darwin-arm64.tar.gz.sha256)。最终源码、checks与产物状态见 [final-checks.json](../test-results/v12-final-checks.json)。
+
+台账的 `implemented_local*` 表示已有代码和相应本地检查，剩余栏仍限制结论；`supported_subset*`、`*_external_pending` 表示支持子集或合同未闭合；`integration_pending` 是本地接入/回归未完；`performance_pending`、`*_ui_partial` 和 `ui_acceptance_pending` 不算相应验收通过。每行 code/test 是当前实际文件与符号锚点，evidence 指向已记录的执行范围；整包 race 日志只证明该次基线，不保证其后新增测试已在同一产物运行。
+
+## 启动和复验
+
+源码构建需要 Go 1.26.2、Node 22.12+、npm、Python 3 和本平台 C 编译器，SQLite 使用 CGO；嵌入产物运行不需要 Go 或 Node。先复制配置选择空闲 loopback 端口和独立私有目录，保留现有实例，再执行：
+
+```sh
+make build
+./bin/gatt -config config.example.json -data-dir /absolute/private/Cove serve
+```
+
+示例端口是 `127.0.0.1:5569`，有现有监听时须先修改副本配置。健康检查使用所选端口的 `/healthz` 和 `/readyz`；staged/quiesce 时公共 ready 为 503，只有持有私有运行令牌的启动器能查询真实初始化健康。管理页从该 origin 进入，依次保存账号/来源、模型、API Key，再按客户端向导调用。HTTP 200 或配置文件写入成功不能替代工具执行与最终回复证据。
+
+源码冻结后的无监听检查与原生构建已独立归档。此前受限时留下以下复验流程；本次执行状态以 review-final-checks.json 为准。以下现有流程用于补齐最终产物验收，并记录二进制 hash、BuildID 与退出结果：
+
+```sh
+make test
+make check
+GATT_CODEX_E2E=1 go test ./internal/app -run '^TestCodexCLIToolLoop$' -count=1 -v
+python3 -m venv /private/tmp/cove-sdk-verification
+/private/tmp/cove-sdk-verification/bin/python -m pip install -r scripts/verify-sdk-requirements.txt
+/private/tmp/cove-sdk-verification/bin/python scripts/verify-sdk.py --binary bin/gatt --output test-results/v12-sdk-final.json
+node web/local-entry-smoke.mjs
+python3 scripts/verify-runtime.py
+python3 scripts/verify-performance.py --binary bin/gatt --duration 1800 --rows 1000000 --output test-results/performance-v12-final.json
+make package
+```
+
+浏览器脚本依赖其声明的 Playwright 环境；浏览器和 runtime 脚本读取仓库的 bin/gatt，并自行创建隔离数据目录。基线性能实例已完成；报告与基线 BuildID 绑定。原生构建证据和本地包由 [build-evidence.py](../scripts/build-evidence.py) 与 [package-platform.sh](../scripts/package-platform.sh)校验；用户服务、备份恢复和更新的具体步骤见[平台命令](platform-commands.md)。不得将跨平台编译、模拟管理器或本机开发启动写成对应平台实机安装通过。

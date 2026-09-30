@@ -1,0 +1,26 @@
+{
+  "reference": "openai/tiktoken 0.12.0",
+  "encoding": "o200k_base",
+  "cases": [
+    {
+      "text": "Hello, world!",
+      "count": 4
+    },
+    {
+      "text": "你好，世界。",
+      "count": 4
+    },
+    {
+      "text": "🦊👨‍👩‍👧‍👦 café",
+      "count": 15
+    },
+    {
+      "text": "def f(x):\n    return x + 1",
+      "count": 10
+    },
+    {
+      "text": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}",
+      "count": 14
+    }
+  ]
+}

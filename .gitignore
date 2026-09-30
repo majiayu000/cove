@@ -1,0 +1,8 @@
+bin/
+node_modules/
+web/dist/*
+!web/dist/.gitkeep
+*.db*
+.DS_Store
+test-results/
+credentials.json

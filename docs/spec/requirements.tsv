@@ -1,0 +1,105 @@
+id	capability	priority	current_status	spec_section	acceptance	test_entry	evidence
+R001	单机启动与目录锁	P0	基础存在	4.2/32.1	空目录可启动；同目录第二进程拒绝；端口占用给出原因	TestDataDirectoryLockAcrossProcesses	cmd/gatt/main.go
+R002	存活与就绪	P0	部分	4.2	存活200但存储异常时ready503且数据面不派发	TestSpecReadiness（新增）	server.go:New
+R003	本机免密码管理会话	P0	基础存在	13.1	直达/刷新/新标签/重启可进入；不出现管理密码必填项	TestLocalAutomaticSessionBoundaries	server.go:loginAdmin
+R004	管理Host与Origin边界	P0	基础存在	13.1	恶意网站和同host不同端口不能写；Key和session互不替代	TestContractManagementBearerIsolation	server.go:admin
+R005	任务关闭屏障	P0	基础存在	4.2	OAuth/刷新/维护/HTTP全部排空后关DB；超时不称排空	TestShutdownDrainsOwnedTasks	server.go:WaitOwnedTasks
+R006	存储故障与崩溃恢复	P0	基础存在	11.2	派发前写失败零调用；派发后失败停止准入；重启旧请求interrupted	TestCrashRecoveryAndStorageFailure	store.go;gateway.go
+R007	运行配置版本与生效	P1	部分	4.3/26.5	version冲突409；新请求新版本；在途快照不被改写	TestSpecRuntimeConfig（新增）	admin.go:sourcesAPI
+R008	构建与运行资产一致	P0	基础存在	17.1/32.1	包内buildID/源码hash/实际JS一致；错误版本可定位	scripts/build-evidence.py；spec-build.e2e（新增）	scripts/build-evidence.py
+R009	可安装发行包	P0	部分	17.1/32.1	无Go/Node环境macOS机器能安装启动并显示API Keys	E08；spec-install.e2e（新增）	Makefile;Cove.command
+R010	隐私默认与诊断脱敏	P0	基础存在	16/33.1	合成秘密不出现在DB/日志/诊断；默认不存正文或工具内容	TestAdminBoundaryAndSecretIsolation	admin.go:diagnostics
+R011	来源CRUD与启停删除	P0	基础存在	5.1/26.2	有效引用阻止删除；启停只阻止新调用；操作失败不丢原配置	TestCancellationDisableRevokeAndDelete	admin.go:sourcesAPI
+R012	原生provider与协议选择	P0	部分	5.1/27.2/36.3	Responses/Chat-only分别发正确路径；API认证方式不由名字猜测	TestSpecProviderContracts（新增）	gateway.go:prepareUpstream
+R013	账号与来源分离	P1	缺失	3.1/5.4	多个来源引用同账号只存在一个刷新owner和account并发计数	TestSpecSharedAccount（新增）	store.go:Source
+R014	独立浏览器OAuth	P0	外部待验	5.3	PKCE/state/nonce/身份验证及真实用户授权完成；不读取日常客户端认证	TestBrowserOAuthPKCEStateAndSave；E01	codex.go;identity.go
+R015	取消登录与更换身份	P0	基础存在	5.3/26.4	双击复用；取消晚到结果不复活；换身份确认前旧绑定有效	TestContractAccountChangeConfirmation	codex.go:confirmLogin
+R016	刷新singleflight与旋转	P0	部分	5.4	并发仅一次刷新；等待者取消不取消共享任务；未知旋转需重登	TestConcurrentRefreshAndUnknownRotation；E01	codex.go:subscriptionCredential
+R017	退出与凭据原子发布	P0	基础存在	5.2/5.4	退出先持久解绑；替换凭据DB失败补偿；晚结果generation冲突丢弃	TestContractLogoutDurableBeforeCleanup	admin.go:replaceCredential;secret.go
+R018	更多账号和设备授权	P2	缺失	5.1/5.3/27.3/36.1	每个provider独立授权/刷新/取消/工具调用验收卡；设备slow_down受控	TestSpecAdditionalProviders（新增）；E10	竞品账号路径；Cove仅Codex
+R019	账号窗口额度	P1	缺失	5.5/27.4/36.2	单位/重置时间/陈旧状态可见；查询不支持不伪造余额	TestSpecQuota（新增）；E04	admin.go:quota-refresh返回422
+R020	代理TLS和认证域隔离	P1	部分	5.2/14	模型/授权/额度走同一来源网络配置；30x不带凭据跨域；TLS错误可见	TestRedirectAndLocalRejection；TestSpecTransport（新增）	store.go:validateURL;server.go:New
+R021	模型自动发现和手填	P0	部分	6.1/26.2	发现失败保留陈旧目录；手填标记未验；不伪造订阅模型资格	TestSpecModels（新增）；E01	admin.go:sourceInput.Models
+R022	模型对Key可见性	P0	部分	6.1	models列表与实际调用使用同一权限交集；禁用无候选模型不列可用	TestSpecModels（新增）	gateway.go:data
+R023	模型别名与显式映射	P1	缺失	6.1/26.3	requested/sent/reported可追溯；别名不悄悄跨模型降级	TestSpecModelAliases（新增）	当前模型字符串直接比较
+R024	逐模型能力矩阵	P0	部分	6.2	原生/转换/调整/不支持/未验证分开；前后端依赖同一返回数据	TestSpecCapabilities（新增）	store.go:Verification;UI本地禁Messages
+R025	逐模型文本与流式验证	P0	部分	6.2	验证绑定协议/模型/generation/适配器版本；不绿化未测模型	TestContractOldResultDoesNotVerifyChangedSource；E02	gateway.go:testSource
+R026	真实函数工具两轮	P0	外部待验	15.4	客户端实际执行工具、回传结果、模型最终答复且两轮可追踪	TestCodexCLIToolLoop；E01/E02	scripts/verify-live.mjs
+R027	并行工具与完整历史	P0	部分	9.1/9.4/34.1	工具ID/参数交错不串；完整opaque输出同源回传	TestCompatFragmentedStreamsAndToolArguments；E02	compat_request.go;compat_output.go
+R028	上下文和输出上限元数据	P1	缺失	6.1/27.4/36.2	未知值留空；模型资格与上下文证据分别展示；不硬编码示例模型限制	TestSpecModelLimits（新增）	Source.Models仅字符串
+R029	逐模型价格版本	P1	部分	12.2/26.3	同来源两个模型价格不同；改价不改旧请求费用快照	TestSpecModelPrices（新增）	store.go:Price目前每Source一份
+R030	兼容验证过期与变更失效	P0	部分	3.2/6.2	凭据/endpoint/模型/adapter变化使相关验证stale，不误用旧passed	TestContractOldResultDoesNotVerifyChangedSource	admin.go;gateway.go
+R031	API Key创建页面	P0	基础存在	7.1/31.4	空库普通用户能找到并完成创建；不靠控制台手写接口	spec-onboarding.e2e（新增）	web/src/main.tsx:API Keys
+R032	Key一次明文和摘要	P0	基础存在	7.1/26.4	只在创建/轮换响应显示；列表/刷新/导出不能拿回；复制失败提示	TestSpecKeys（新增）	admin.go:keysAPI
+R033	Key来源或路由绑定	P1	部分	7.2/26.3	固定来源和route均可选；换绑version冲突409；旧资源不能越界续接	TestSpecKeyTargets（新增）	ClientKey.SourceID
+R034	Key模型和协议权限	P0	缺失	7.2/26.3	越权403且零上游调用；null继承与空列表禁止语义明确	TestSpecKeys（新增）	ClientKey暂无权限字段
+R035	Key到期启停撤销	P1	部分	7.2/26.3	UTC过期立即拒绝；撤销不可恢复原secret；在途行为可选且明确	TestSpecKeyLifecycle（新增）	keysAPI仅Revoked
+R036	Key轮换与切换窗口	P1	缺失	7.3/26.3	新Key先验再撤旧；期限准确；应用失败不重复创建或静默撤旧	TestSpecKeyRotation（新增）	无rotate接口
+R037	Key RPM和TPM	P1	缺失	7.4/34.2	并发边界准确；TPM真实/预估标注；429 Retry-After可计算	TestSpecRateLimits（新增）	仅全局slots
+R038	Key与账号并发限制	P1	部分	7.4/34.2	global/key/route/account同一顺序准入；取消不漏槽；无锁等待网络	TestSpecConcurrencyLimits（新增）	App.slots
+R039	Key预算与使用反馈	P1	缺失	12.3/26.3	创建页可绑定预算；列表显示已结算/预留/未知；不是只有金额输入框	TestSpecAccounting（新增）；spec-console.e2e（新增）	ClientKey暂无budget
+R040	每Key接入信息与最后使用	P0	基础存在	7.1/15.2	URL/model/protocol示例匹配当前Key目标；真实调用才更新最后使用	spec-onboarding.e2e（新增）	UI接入与恢复;LastSeen
+R041	Responses原生文本和工具	P0	部分	8/9.1	原生合法字段和opaque history保留；JSON/SSE真实SDK解析	TestNativeJSONAndOpaqueToolHistory；E02	gateway.go:validateRequest
+R042	Chat原生和跨协议转换	P0	部分	8.2/9.1/34.1	Chat-only上游、Responses上游均完成stream/JSON/工具结果两轮	TestSpecProtocolMatrix（新增）；E02	compat_request.go
+R043	Messages原生和转换	P0	部分	8.2/9.1/34.1	工具/错误/stop语义完整；原生Messages不绕Responses丢字段	TestSpecProtocolMatrix（新增）；E02	compat_output.go
+R044	Codex订阅Messages可用	P0	缺失	9.2	明确调整开关、开启后真实Claude Code两轮通过；上限不生效可见	TestSpecCodexMessages（新增）；E02/E03	compatInput对Codex max_tokens拒绝
+R045	请求字段与结构化输出	P0	部分	9.1/34.1	system/developer/schema/strict/choice/stop等逐项映射；未知字段不静默丢	TestSpecProtocolFields（新增）	strictJSON当前白名单较窄
+R046	SSE分块与错误终态	P0	基础存在	9.4/34.1	任意UTF8/CRLF/多行/交错工具；中断不成功；观察超限状态准确	TestCompatFragmentedStreamsAndToolArguments；TestContractOversizeTerminalIsUnverified	sse.go;compat_output.go
+R047	usage wire合同与token计数	P0	部分	9.3/34.1	SDK数字字段合法且估算有标识；未知实际不填0；累计量不重复相加	TestSpecWireUsage（新增）；E03	compatUsage当前可输出null
+R048	签名思考和opaque状态	P0	部分	9.1/30.1	原生完整保持；无法跨协议时派发前拒绝并给替代路径；不伪造签名	TestSpecOpaqueState（新增）	Responses保留；compat拒绝/跳过部分reasoning
+R049	取消超时背压与无隐式重放	P0	基础存在	9.4	取消解除堵塞写；下游慢不算上游idle；POST不被transport自动重放	TestContractCancellationWakesBlockedWriter；TestContractPostBodiesNotReplayable	gateway.go
+R050	统一错误与安全头处理	P0	部分	14/26.1	状态码/协议错误/字段/request_id一致；30x与秘密隔离；未知路由404	TestSpecErrorContracts（新增）	server.go:fail;messagesErrors
+R051	固定来源与池路由配置	P1	部分	10.1/26.3	UI和API建立可用route；预览给候选理由；不能靠代码写死列表	TestSpecRouting（新增）	现有固定SourceID
+R052	优先级加权轮询	P1	缺失	10.1/34.2	确定性种子/时钟下按最高可用优先级和权重分配；并发不饿死成员	TestSpecRouting（新增）	无scheduler
+R053	健康冷却与恢复	P1	缺失	10.4	401/模型不存在/网络/额度按各自作用域；half-open单探测；不修改enabled	TestSpecHealthCooldown（新增）	仅最近call_health
+R054	有界故障切换与尝试预算	P1	缺失	10.2	max_attempts和总期限严格生效；允许分支切换、未知提交不重放	TestSpecAttemptSafety（新增）；E05	当前永远一次应用尝试
+R055	逐尝试独立持久化计量	P1	缺失	11.1/11.2	一请求多attempt顺序唯一；失败尝试可计费；成功不覆盖旧失败	TestSpecAttemptsStore（新增）	attempts sequence CHECK=1
+R056	状态资源归属隔离	P0	基础存在	10.3/29.1	跨Key/账号/generation/model资源引用拒绝；过期不能复活	TestBindingsRejectAnotherKeyAndSource；TestContinuationIsolationAndURLGeneration	store.go:bindings
+R057	无状态会话亲和	P1	缺失	10.3	SessionID仅在Key内生效；TTL过期可重选；绑定优先于亲和	TestSpecAffinity（新增）	无affinity
+R058	队列准入和取消	P1	部分	7.4/10.1/34.2	默认不排队；启用后容量/期限明确；队列取消移除；先容量后读大body	TestContractAdmissionBeforeBody；TestSpecQueue（新增）	当前slots满即拒绝
+R059	模型/额度/能力选路	P1	缺失	10.1	不合协议/工具/预算的候选被排除；未知quota不当0；跨模型需显式配置	TestSpecRouteEligibility（新增）	当前仅配置模型匹配
+R060	可解释路由与变更快照	P1	缺失	10.1/4.3	记录选中/排除/重试理由与版本；预览不发请求；修改不改在途归属	TestSpecRouteExplain（新增）	当前无route实体
+R061	真实用量与未知分离	P0	基础存在	12.1	真实0/partial/unknown可辨；缓存和reasoning不重复计；失败已知量保留	TestUsageDecimalsUnknownAndCurrencies	usage.go
+R062	历史费用快照多币种	P0	基础存在	12.2	历史价格固定；币种不相加；部分费用不称总费用；订阅不冒充API账单	TestPartialPriceDoesNotClaimTotal	usage.go:estimate
+R063	多预算层原子预留	P1	缺失	12.3/34.3	20并发多层预算不超本地预留阈值；失败无半笔预留	TestSpecBudgetReservation（新增）；E06	无budget表
+R064	结算幂等和未知费用处理	P1	缺失	11.2/12.3/34.3	重复终态只结一次；崩溃未知保留pending；取消不自动归零	TestSpecBudgetSettlement（新增）；E06	当前无reservation
+R065	严格预算与软限制资格	P1	缺失	12.3	无可信上界来源不能标硬封顶；忽略max_tokens的兼容路由被严格预算排除	TestSpecBudgetEligibility（新增）	无预算模式
+R066	额度窗口历史与提醒	P1	缺失	5.5/12.4/27.4/36.2	显示多个窗口/更新时间/重置；接近阈值提醒；失败保留陈旧观测	TestSpecQuota（新增）；E04	当前quota-refresh不支持
+R067	请求尝试用量报表	P1	部分	12.4/26.5	key/模型/route/账号/协议/结果过滤，区分request与attempt数量和TTFT	TestSpecUsageQueries（新增）	usageAPI当前全量拉取JSON
+R068	管理测试计量与筛选	P0	基础存在	12.4	文本和工具测试进入共同执行/计量；origin可筛且统计口径可见	TestAdminTestsMeteredAndContinuationVerified	gateway.go:testSource
+R069	导出与保留清理	P1	部分	12.4/16/17.3/32.4	CSV防公式注入；JSON正确；保留清理级联bindings并显示影响	TestSpecExports（新增）；TestRetentionDeletesBindings	admin.go:diagnostics;Store.cleanup
+R070	查询性能与可重建聚合	P1	缺失	12.4/17.4/26.5	百万元数据分页P95目标可测；SQL索引；内存不随全历史线性增长	BenchmarkSpecUsageQuery（新增）	usageAPI:listRecords无limit
+R071	完整控制台导航和空状态	P1	部分	15.1/31.4	每目标模块都有入口/操作/结果；空库与无匹配记录提示不同	spec-console.e2e（新增）	UI当前5页
+R072	异步状态冲突与无障碍	P1	部分	15.1/31.4	旧请求不覆盖新选择；实体busy；键盘焦点/label/375px不溢出	spec-console.e2e（新增）	UI全局busy/Promise.all
+R073	接入向导与真调用反馈	P0	部分	1.2/15.2/31.4	来源→模型→Key→客户端→工具→记录闭环；HTTP200不等于成功	spec-onboarding.e2e（新增）；E01/E02	UI有curl/Codex命令
+R074	客户端检测和配置预览	P1	缺失	15.3/31.1/36.4	只读选定路径/版本/scope；diff不泄密；未知配置不误覆盖	TestSpecClientConfig（新增）	当前仅模板
+R075	配置应用和并发修改保护	P1	缺失	15.3/31.1/36.4	hash变更409；原子单文件写；多文件部分失败真实报告	TestSpecClientConfig（新增）；E07	无client_changes
+R076	三方恢复与保留官方登录	P1	部分	15.3/31.1	只恢复Cove改的字段；用户后改冲突保留；直连测试不经过Cove	TestSpecClientRestore（新增）；E07	当前只有手动说明
+R077	Codex完整客户端验收	P0	外部待验	15.2/15.4/30.2/30.3	实际版本文本/工具/并行/长历史；必要compact或WS未过不得宣称兼容	E01/E09	scripts/verify-live.mjs
+R078	Claude Code与SDK验收	P0	外部待验	15.2/34.1	Codex订阅Messages与原生来源分开测；stream/工具/usage/取消通过	E02/E03	无真实通过证据
+R079	更多编程工具接入	P2	缺失	15.2/31.2/36.4	Gemini/OpenCode/编辑器逐版本逐模式卡；填URL不代表Agent模式通过	spec-clients.e2e（新增）；E10	无完整工具配置器
+R080	请求详情和恢复操作	P1	部分	15.1/26.5	一处定位source/account/model/attempt/adjustment/error；可取消或跳修复入口	spec-console.e2e（新增）	UI detail已有三维状态
+R081	私有凭据文件一致性	P0	基础存在	5.2/16	并发修改不覆盖新值；fsync不确定锁定读写；symlink/损坏拒绝覆盖	TestFileSecretsConcurrentUpdates；TestFileSecretsFailedWriteDoesNotPublish	secret.go
+R082	备份与恢复可操作流程	P1	部分	17.3/32.3/32.4	元数据和含凭据分开；一致快照；恢复预览；缺凭据需重登不丢模型	TestSpecBackup（新增）；E08	目前手动复制说明+模拟脚本
+R083	诊断doctor与审计	P1	部分	16/17.1/33.1	用户可定位端口/存储/认证/路由；脱敏变更记录；不导出账号秘密	TestSpecDiagnostics（新增）	当前diagnostics仅最近100条
+R084	后台服务与自动启动	P2	缺失	17.2/32.1	用户显式启停；真实pid/端口/版本；卸载恢复启动注册	TestSpecServiceLifecycle（新增）；E10	Cove.command需保留终端
+R085	更新与失败回退	P2	缺失	17.2/32.2	验证包完整性；排空替换；失败旧版可用；schema不兼容不能假回滚	TestSpecUpdate（新增）	无更新流程
+R086	平台构建与目录权限	P2	缺失	17.1/32.1	macOS/Windows/Linux各自真实包；锁/浏览器/ACL/CGO按平台验证	TestSpecPlatforms（新增）；E10	当前macOS专用flock/open
+R087	资源边界和并发性能	P0	部分	14/17.4	8路长流30分钟有界；取消5秒回收；记录机器和基准，不用公网推性能	TestEightStreamsCapacityAndCancellation；BenchmarkSpecGateway（新增）	gateway.go:sse limits
+R088	公平超时与网络恢复	P1	部分	9.4/14	header/idle/total/write-stall分开；代理失败可定位；恢复不重放未知请求	TestContractBackpressureNotUpstreamIdle；TestSpecTransport（新增）	gateway.go
+R089	发布证据与分层验收	P0	部分	21/23	单测/SDK/UI/provider/干净安装分开；每条pass有版本和artifact；失败不能隐藏	SpecCoverage检查；E08	build-evidence;现有test-results
+R090	单一规格与旧设计收敛	P0	本文已设计	0.1/20/24	所有旧A映射；实现任务只引用统一需求；删除残留票据依赖前检查调用者	old-spec-coverage.tsv；validate-spec.py	旧Spec及docs补充相互有冲突
+R091	Gemini协议与签名历史	P2	缺失	8.1/9.1/30.1	generateContent/streamGenerateContent/SDK工具与thoughtSignature同源往返	TestSpecGemini（新增）；E09	当前无Gemini入口
+R092	图像输入生成编辑	P2	缺失	18.1/28.2	mime/大小/URL/base64/文件归属，原生端点真实调用与费用，不能转成文本冒充	TestSpecImages（新增）；E09	当前仅文本
+R093	音频与Realtime	P2	缺失	18.1/18.2/28.3/30.4	转录/语音/实时各自mime与双向流；取消与计量；实时不走文本SSE转换	TestSpecAudioRealtime（新增）；E09	当前无音频operation
+R094	Embeddings与Rerank	P2	缺失	18.1/28.4	批量顺序/向量维度/编码/score-index正确；独立usage；rerank合同不冒充官方	TestSpecVectorsRerank（新增）；E09	当前无相关路由
+R095	Files与后台批任务	P2	缺失	18.1/18.2/29	资源CRUD/查询取消绑定Key账号generation；轮询不重生成；暂存过期清理	TestSpecResourcesJobs（新增）；E09	当前仅response绑定
+R096	Compact和Responses WebSocket	P2或客户端P0	缺失	18.2/30.2/30.3/36.3	同账号压缩/续轮/WS断开不重放；若目标客户端必需则阻塞P0	TestSpecCompactWebSocket（新增）；E09	UI提示未验证
+R097	原生服务端工具与缓存	P2	缺失	18.2/30.5/36.3	server工具仅支持来源透传并计费；缓存标识/隔离/TTL；工具请求不误命中	TestSpecServerToolsCache（新增）；E09	当前validateTools只客户端工具
+R098	MCP Skills与项目配置扩展	P2	缺失	18.2/31.3/36.4	只管理配置与恢复；不读取指令当网关权限；不在服务执行任意工具	TestSpecConfigExtensions（新增）	CC Switch可借鉴；Cove无实现
+R099	团队充值远程多租户边界	范围外	已明确范围	1.3/18.3/35.3	文档列明能力和改目标触发条件；本机自动session不直接用于远程多人部署	SpecScopeReview（文档检查）	New API/Sub2API相邻产品能力
+R100	完整交付及外部实验闭环	P0/P1/P2	外部待验	22/25/35	全部需求逐项有证据或明确范围结论；E01-E10未通过不假称完成；保留原45验收	validate-spec.py；E01-E10	requirements.tsv;old-spec-coverage.tsv
+R101	运行指标日志与可选Tracing	P1/P2	部分	19.1/33.1	本机指标可看；无敏感高基数标签；OTLP导出有界且失败不阻塞推理	TestSpecObservability（新增）	当前只有本地记录和状态计数
+R102	成本延迟与上下文选路	P2	缺失	19.1/33.3	同语义候选按可信价格/观测排序；未知有明确策略；不自动改写prompt	TestSpecAdvancedRouting（新增）	LiteLLM/Bifrost/Portkey参照
+R103	配置导入导出与冲突预览	P2	缺失	19.1/33.4	不含秘密默认导出；引用可解析；冲突预览；不支持字段报告且原配置保留	TestSpecConfigTransfer（新增）	当前无配置搬运产品流程
+R104	额度故障提醒与恢复	P1/P2	部分	19.1/33.2	UI去重提醒及恢复；可选通知脱敏有界；通知失败不触发模型重试	TestSpecNotifications（新增）	当前只有error/notice提示

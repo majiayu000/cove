@@ -1,0 +1,19 @@
+{
+  "listen": "127.0.0.1:5569",
+  "data_dir": "",
+  "max_body_bytes": 8388608,
+  "max_response_bytes": 16777216,
+  "max_event_bytes": 1048576,
+  "max_concurrent": 8,
+  "header_timeout_seconds": 60,
+  "idle_timeout_seconds": 120,
+  "total_timeout_seconds": 1800,
+  "retention_days": 7,
+  "codex": {
+    "base_url": "https://chatgpt.com/backend-api/codex",
+    "auth_base_url": "https://auth.openai.com",
+    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "client_version": "0.158.0",
+    "redirect_uri": "http://localhost:1455/auth/callback"
+  }
+}
