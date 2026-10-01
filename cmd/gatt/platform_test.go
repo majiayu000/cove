@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,10 +27,46 @@ func privateTempDir(t *testing.T) string {
 	}
 	return dir
 }
+func assertPrivatePlatformPath(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatalf("private path permission mismatch: %s %v", path, err)
+		}
+		return
+	}
+	script := `$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $inputData.path; $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])); $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; if(-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $owner -or $rules[0].AccessControlType -ne 'Allow' -or ($rules[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl){throw 'Path is not restricted to the current user'}; 'private'`
+	output, err := nativePlatformRunner(context.Background(), "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", powershellEncoded(script, map[string]string{"path": path}))
+	if err != nil || strings.TrimSpace(string(output)) != "private" {
+		t.Fatalf("private Windows ACL mismatch: %s %v %s", path, err, output)
+	}
+}
+
+func TestSpecPrivateJournalPublication(t *testing.T) {
+	dir := privateTempDir(t)
+	if err := protectPlatformPath(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "journal.json")
+	for _, data := range []string{"first", "replacement"} {
+		if err := writePrivate(path, []byte(data)); err != nil {
+			t.Fatal(err)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil || string(content) != data {
+			t.Fatal("journal publication failed", err)
+		}
+		assertPrivatePlatformPath(t, path, 0600)
+	}
+}
 func fakePlatform(t *testing.T, goos string) platformEnvironment {
 	t.Helper()
 	root := privateTempDir(t)
 	exe := filepath.Join(root, "Cove 中文", "gatt")
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
 	if err := os.MkdirAll(filepath.Dir(exe), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +95,11 @@ func TestSpecPlatformsBrowserAndDirectories(t *testing.T) {
 		}
 	}
 	dir, err := platformDefaultDataDir("darwin", "/Users/中文 用户", "", "")
-	if err != nil || !strings.Contains(dir, "Application Support/Cove") {
+	if err != nil || !strings.HasSuffix(dir, filepath.Join("Application Support", "Cove")) {
 		t.Fatal(dir, err)
 	}
 	dir, err = platformDefaultDataDir("linux", "/home/u", "/private/data", "")
-	if err != nil || dir != "/private/data/Cove" {
+	if err != nil || dir != filepath.Join("/private/data", "Cove") {
 		t.Fatal(dir, err)
 	}
 	if _, err = platformDefaultDataDir("windows", "", "", ""); err == nil {
@@ -97,7 +134,7 @@ func TestSpecServiceLifecycleSyntheticManagers(t *testing.T) {
 						return []byte(`{"exists":false}`), nil
 					}
 					document, err := env.serviceDocument()
-					return mustPlatformJSON(map[string]any{"exists": true, "document": string(document), "state": 3}), err
+					return mustPlatformJSON(map[string]any{"exists": true, "document": windowsTaskText(document), "state": 3, "run_level": 0}), err
 				}
 				if name == "systemctl" && args[1] == "daemon-reload" {
 					_, err := os.Stat(env.servicePath())
@@ -178,8 +215,11 @@ func TestSpecServiceWindowsControlledXML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(data) < 2 || data[0] != 0xff || data[1] != 0xfe {
+		t.Fatal("Windows task document must be UTF-16LE with BOM")
+	}
 	var task windowsTask
-	if err = xml.Unmarshal(data, &task); err != nil {
+	if err = xml.Unmarshal([]byte(windowsTaskText(data)), &task); err != nil {
 		t.Fatal(err)
 	}
 	if task.Principals.Principal.UserID != env.UserID || task.Principals.Principal.RunLevel != "LeastPrivilege" || len(task.Actions.Exec) != 1 || task.Actions.Exec[0].Command != env.Executable || strings.Contains(task.Actions.Exec[0].Arguments, "cmd.exe") {
@@ -279,6 +319,12 @@ func TestSpecPlatformsPrivateDirectoryAndLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.Close()
+	if runtime.GOOS == "windows" {
+		// Windows protects the directory with a current-user DACL; POSIX chmod
+		// does not describe its access policy.
+		assertPrivatePlatformPath(t, dir, 0700)
+		return
+	}
 	if err = os.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -321,13 +367,7 @@ func TestSpecServiceInstallPreparesPrivateLogDirectory(t *testing.T) {
 	if err := env.service(context.Background(), "install"); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(env.DataDir)
-	if err != nil {
-		t.Fatal("service install must create its private log/data directory before launchd can create it:", err)
-	}
-	if info.Mode().Perm() != 0700 {
-		t.Fatalf("data/log parent permission=%o", info.Mode().Perm())
-	}
+	assertPrivatePlatformPath(t, env.DataDir, 0700)
 }
 
 func TestSpecWindowsTaskQueryDistinguishesAbsentAndFailure(t *testing.T) {
@@ -349,5 +389,30 @@ func TestSpecWindowsTaskQueryDistinguishesAbsentAndFailure(t *testing.T) {
 				t.Fatalf("task query lost absence/error contract: %v %s %v", registered, state, err)
 			}
 		})
+	}
+}
+
+func TestSpecWindowsOmittedRunLevelStillRequiresLeastPrivilege(t *testing.T) {
+	for _, level := range []any{0, 1, nil} {
+		env := fakePlatform(t, "windows")
+		document, err := env.serviceDocument()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writePrivate(env.servicePath(), document); err != nil {
+			t.Fatal(err)
+		}
+		exported := strings.Replace(windowsTaskText(document), "<RunLevel>LeastPrivilege</RunLevel>", "", 1)
+		env.Run = func(context.Context, string, ...string) ([]byte, error) {
+			return mustPlatformJSON(map[string]any{"exists": true, "document": exported, "state": 3, "run_level": level}), nil
+		}
+		registered, _, state, err := env.managerStatus(context.Background())
+		if level == 0 {
+			if err != nil || !registered || state != "ready" {
+				t.Fatal("default LUA export rejected", state, err)
+			}
+		} else if err == nil || state != "conflict" {
+			t.Fatal("unknown or elevated privilege accepted", state, err)
+		}
 	}
 }

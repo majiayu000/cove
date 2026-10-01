@@ -21,10 +21,7 @@ func TestFileSecretsPersistenceAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, mode := range map[string]os.FileMode{filepath.Dir(v.path): 0700, v.path: 0600} {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != mode {
-			t.Fatalf("private permissions not applied: %s", path)
-		}
+		assertPrivateTestPermissions(t, path, mode)
 	}
 	if err := v.Put("source", "replacement"); !errors.Is(err, os.ErrExist) {
 		t.Fatal("existing credential overwritten")

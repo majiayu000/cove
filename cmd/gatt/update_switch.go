@@ -35,7 +35,11 @@ type updateSnapshotManifest struct {
 // backup API includes committed WAL; private refs keep their relative paths.
 // This local rollback checkpoint is not a portable or age-encrypted backup.
 func updateSQLiteSnapshot(ctx context.Context, sourcePath, targetPath string) error {
-	uri := &url.URL{Scheme: "file", Path: filepath.ToSlash(sourcePath)}
+	uriPath := filepath.ToSlash(sourcePath)
+	if filepath.VolumeName(sourcePath) != "" {
+		uriPath = "/" + uriPath
+	}
+	uri := &url.URL{Scheme: "file", Path: uriPath}
 	uri.RawQuery = url.Values{"mode": {"ro"}}.Encode()
 	source, err := sql.Open("sqlite3", uri.String())
 	if err != nil {

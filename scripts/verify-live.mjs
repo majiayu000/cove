@@ -192,20 +192,26 @@ try {
   const child = spawn("codex", ["exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--cd", cliDir, "只运行一次命令 printf GATT_REAL_TOOL_OK，根据实际工具返回值回答。不要读写文件、访问网络或执行其他命令。"], {
     env: { PATH: process.env.PATH, HOME: cliDir, CODEX_HOME: home, PERSONAL_GATEWAY_KEY: key.secret, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"],
   });
-  let output = "";
+  let output = "", finalReply = "";
+  child.stdout.on("data", b => { finalReply = (finalReply + b.toString()).slice(-10000); });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", b => { output = (output + b.toString()).slice(-500000); });
   const timeout = setTimeout(() => child.kill("SIGTERM"), 120000);
   let exitCode;
   try { exitCode = await new Promise((resolve, reject) => { child.on("error", reject); child.on("close", resolve); }); } finally { clearTimeout(timeout); }
-  report.cli = { client_version: execFileSync("codex", ["--version"], { encoding: "utf8" }).trim(), exit_code: exitCode, tool_command_observed: output.includes("printf GATT_REAL_TOOL_OK"), tool_success_observed: /succeeded[^\n]*\nGATT_REAL_TOOL_OK/.test(output) };
+  report.cli = { client_version: execFileSync("codex", ["--version"], { encoding: "utf8" }).trim(), exit_code: exitCode, tool_command_observed: output.includes("printf GATT_REAL_TOOL_OK"), tool_success_observed: /succeeded[^\n]*\nGATT_REAL_TOOL_OK/.test(output), final_reply_matches_tool: finalReply.trim() === "GATT_REAL_TOOL_OK" };
   const records = (await admin(`requests?client_key_id=${key.key.id}`)).items;
-  report.requests = records.map(r => ({ id: r.id, protocol: r.protocol, status: r.status, http_status: r.http_status, error_stage: r.error_stage, usage: r.usage, usage_completeness: r.usage_completeness }));
+  report.requests = records.map(r => ({ id: r.id, protocol: r.protocol, status: r.status, upstream_status: r.upstream_status, delivery_status: r.delivery_status, observation_status: r.observation_status, http_status: r.http_status, error_stage: r.error_stage, usage: r.usage, usage_completeness: r.usage_completeness }));
   const usage = await admin(`usage?client_key_id=${key.key.id}`);
   report.usage_summary = usage;
   const input = records.reduce((sum, r) => sum + (r.usage.input_tokens ?? 0), 0);
   const outputTokens = records.reduce((sum, r) => sum + (r.usage.output_tokens ?? 0), 0);
   report.usage_totals_match_records = usage.requests === records.length && usage.known_input_tokens === input && usage.known_output_tokens === outputTokens;
-  report.passed = report.cases.every(r => r.passed) && exitCode === 0 && report.cli.tool_success_observed && records.length >= 8 && records.every(r => r.status === "succeeded" && Number.isInteger(r.usage.input_tokens) && Number.isInteger(r.usage.output_tokens)) && report.usage_totals_match_records;
+  // A CLI may close the HTTP body after consuming the formal terminal. Keep
+  // that local cancellation visible; require independent CLI final-output and
+  // upstream-completion evidence rather than rewriting it as request success.
+  const cliTerminalClose = r => !wireUsage.has(r.id) && r.status === "cancelled" && r.error_stage === "cancelled" && r.upstream_status === "completed" && r.observation_status === "complete" && r.usage_completeness === "complete" && report.cli.final_reply_matches_tool;
+  report.cli_terminal_close_request_ids = records.filter(cliTerminalClose).map(r => r.id);
+  report.passed = report.cases.every(r => r.passed) && exitCode === 0 && report.cli.tool_success_observed && report.cli.final_reply_matches_tool && records.length >= 8 && records.every(r => (r.status === "succeeded" || cliTerminalClose(r)) && Number.isInteger(r.usage.input_tokens) && Number.isInteger(r.usage.output_tokens)) && report.usage_totals_match_records;
 } catch (error) {
   report.error = error.message;
 } finally {

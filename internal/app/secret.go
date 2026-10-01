@@ -35,7 +35,7 @@ func NewFileSecrets(dataDir string) (*FileSecrets, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("凭据目录必须为普通目录")
 	}
-	if err := os.Chmod(dir, 0700); err != nil {
+	if err := protectAppPath(dir, 0700); err != nil {
 		return nil, fmt.Errorf("凭据目录权限设置失败: %w", err)
 	}
 	v := &FileSecrets{path: filepath.Join(dir, "credentials.json"), values: map[string]string{}}
@@ -49,7 +49,7 @@ func NewFileSecrets(dataDir string) (*FileSecrets, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("凭据文件必须为普通文件")
 	}
-	if err := os.Chmod(v.path, 0600); err != nil {
+	if err := protectAppPath(v.path, 0600); err != nil {
 		return nil, fmt.Errorf("凭据文件权限设置失败: %w", err)
 	}
 	b, err := os.ReadFile(v.path)
@@ -131,12 +131,12 @@ func (v *FileSecrets) save(next map[string]string) (result error) {
 	if err = errors.Join(writeErr, f.Close()); err != nil {
 		return fmt.Errorf("凭据文件保存失败: %w", err)
 	}
-	if err = os.Rename(f.Name(), v.path); err != nil {
+	if err = replaceAppFile(f.Name(), v.path); err != nil {
 		return fmt.Errorf("凭据文件替换失败: %w", err)
 	}
 	dir, err := os.Open(filepath.Dir(v.path))
 	if err == nil {
-		err = errors.Join(dir.Sync(), dir.Close())
+		err = errors.Join(syncAppDirectory(dir), dir.Close())
 	}
 	if err != nil {
 		// Rename happened, but its durability is uncertain. Neither the old cache

@@ -14,7 +14,7 @@ var lockFileEx = syscall.NewLazyDLL("kernel32.dll").NewProc("LockFileEx")
 var setFileSecurity = syscall.NewLazyDLL("advapi32.dll").NewProc("SetFileSecurityW")
 var convertSecurityDescriptor = syscall.NewLazyDLL("advapi32.dll").NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 
-func protectWindowsDirectory(path string) error {
+func protectPlatformPath(path string, mode os.FileMode) error {
 	token, err := syscall.OpenCurrentProcessToken()
 	if err != nil {
 		return err
@@ -28,8 +28,12 @@ func protectWindowsDirectory(path string) error {
 	if err != nil {
 		return err
 	}
-	// Protected DACL: only this user receives full access; new children inherit it.
-	text, err := syscall.UTF16PtrFromString("D:P(A;OICI;FA;;;" + sid + ")")
+	// Protected DACL: only this user receives full access; directory children inherit it.
+	inheritance := ""
+	if mode == 0700 {
+		inheritance = "OICI"
+	}
+	text, err := syscall.UTF16PtrFromString("D:P(A;" + inheritance + ";FA;;;" + sid + ")")
 	if err != nil {
 		return err
 	}
@@ -60,7 +64,7 @@ func lockDataDir(dir string) (*os.File, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("数据目录必须是真实目录")
 	}
-	if err = protectWindowsDirectory(dir); err != nil {
+	if err = protectPlatformPath(dir, 0700); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, ".gatt.lock")

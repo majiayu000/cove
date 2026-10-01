@@ -970,7 +970,11 @@ func (t *clientTarget) replace(content []byte, expected string, remove bool) (ch
 				result = errors.Join(result, err)
 			}
 		}()
-		if _, err = f.Write(content); err == nil {
+		err = protectAppFile(f)
+		if err == nil {
+			_, err = f.Write(content)
+		}
+		if err == nil {
 			err = f.Sync()
 		}
 		err = errors.Join(err, f.Close())
@@ -998,7 +1002,7 @@ func (t *clientTarget) replace(content []byte, expected string, remove bool) (ch
 	if err != nil {
 		return true, err
 	}
-	return true, errors.Join(dir.Sync(), dir.Close())
+	return true, errors.Join(syncAppDirectory(dir), dir.Close())
 }
 
 // The document editor changes selected scalar values only. JSONC is kept as an

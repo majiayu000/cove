@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -346,25 +345,6 @@ func (a *App) resourceOperationsAPI(w http.ResponseWriter, r *http.Request) bool
 	}
 	a.resourceResponses(w, r, parts[2:])
 	return true
-}
-func resourceFreeSpace(ctx context.Context, dir string) (uint64, error) {
-	// df is read-only and receives the trusted data directory as a distinct argument. No shell is involved.
-	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	out, e := exec.CommandContext(probe, "df", "-Pk", dir).Output()
-	if e != nil {
-		return 0, e
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) < 2 {
-		return 0, errors.New("disk capacity unavailable")
-	}
-	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) < 4 {
-		return 0, errors.New("disk capacity unavailable")
-	}
-	available, e := strconv.ParseUint(fields[3], 10, 64)
-	return available * 1024, e
 }
 
 // Run once at startup before opening admission. Never removes recent or symlink entries.

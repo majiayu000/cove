@@ -314,10 +314,7 @@ func TestSpecServerToolsCacheGeminiOptInAndReplay(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatal("cache index/directory mismatch")
 	}
-	info, _ := os.Stat(filepath.Join(a.Config.DataDir, ".response-cache", files[0].Name()))
-	if info.Mode().Perm() != 0600 {
-		t.Fatal("cache body not private")
-	}
+	assertPrivateTestPermissions(t, filepath.Join(a.Config.DataDir, ".response-cache", files[0].Name()), 0600)
 	toolBody := strings.TrimSuffix(geminiTextRequest, "}") + `,"tools":[{"googleSearch":{}}]}`
 	extendedStatus(t, extendedGeminiCall(a, "POST", path, toolBody, "test-client-key", nil), 200)
 	if calls.Load() != 5 {

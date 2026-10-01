@@ -212,10 +212,8 @@ func TestSpecConfigExtensionsMCPConflictAndSecretRedaction(t *testing.T) {
 	if !strings.Contains(string(readClient(t, in.Path)), "SENTINEL_MCP_SECRET") {
 		t.Fatal("explicit private secret delivery not applied")
 	}
-	info, err := os.Stat(in.Path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("secret config must be 0600")
-	}
+	assertPrivateTestPermissions(t, in.Path, 0600)
+	var err error
 	var metadata string
 	if err = f.a.Store.DB.QueryRow("SELECT data FROM client_changes WHERE id=?", c.ID).Scan(&metadata); err != nil {
 		t.Fatal(err)
@@ -291,10 +289,7 @@ func TestSpecConfigExtensionsSkillsOwnership(t *testing.T) {
 	if string(readClient(t, filepath.Join(path, "SKILL.md"))) != skill {
 		t.Fatal("skill content changed")
 	}
-	info, err := os.Stat(filepath.Join(path, "scripts", "tool.sh"))
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("copied script became executable")
-	}
+	assertClientScriptNotExecutable(t, filepath.Join(path, "scripts", "tool.sh"))
 	user := "USER_MODIFIED_SKILL"
 	writeClient(t, filepath.Join(path, "SKILL.md"), user)
 	writeClient(t, filepath.Join(path, "user-added.txt"), "preserve")

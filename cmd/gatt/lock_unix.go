@@ -9,6 +9,8 @@ import (
 	"syscall"
 )
 
+func protectPlatformPath(path string, mode os.FileMode) error { return os.Chmod(path, mode) }
+
 func lockDataDir(dir string) (*os.File, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err

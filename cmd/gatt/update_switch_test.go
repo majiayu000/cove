@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func syntheticUpdateSwitch(t *testing.T, platform ...string) (platformEnvironment, updateJournal, string) {
@@ -361,10 +364,10 @@ func TestSpecUpdateSnapshotIncludesCommittedWALAndRejectsSpool(t *testing.T) {
 // temp data directory and ephemeral loopback port. Manager queries are mocked;
 // actual PID/executable/port checks apply exclusively to that owned subprocess.
 func TestSpecUpdateSwitchRealHelperSubprocess(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skip("native Unix subprocess acceptance; Windows requires its own build host")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("native subprocess acceptance requires a supported build host")
 	}
-	if _, err := exec.LookPath("lsof"); err != nil {
+	if _, err := exec.LookPath("lsof"); runtime.GOOS != "windows" && err != nil {
 		t.Skip("native identity tool lsof unavailable")
 	}
 	env, journal, filename := syntheticUpdateSwitch(t, runtime.GOOS)
@@ -402,6 +405,20 @@ func TestSpecUpdateSwitchRealHelperSubprocess(t *testing.T) {
 		}
 		if executable == "systemctl" {
 			return []byte("LoadState=not-found\n"), nil
+		}
+		if executable == "powershell.exe" {
+			raw, err := base64.StdEncoding.DecodeString(args[len(args)-1])
+			if err != nil {
+				return nil, err
+			}
+			units := make([]uint16, len(raw)/2)
+			for i := range units {
+				units[i] = binary.LittleEndian.Uint16(raw[i*2:])
+			}
+			if strings.Contains(string(utf16.Decode(units)), "Get-ScheduledTask") {
+				return []byte(`{"exists":false}`), nil
+			}
+			return nativePlatformRunner(ctx, executable, args...)
 		}
 		if executable != "lsof" {
 			return nil, errors.New("unexpected native command")

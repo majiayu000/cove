@@ -1396,7 +1396,7 @@ func (a *App) responseCacheRoot() (*os.Root, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, storageError()
 	}
-	if err = os.Chmod(path, 0700); err != nil {
+	if err = protectAppPath(path, 0700); err != nil {
 		return nil, err
 	}
 	return os.OpenRoot(path)
@@ -1777,7 +1777,7 @@ func (a *App) storeResponseCache(d *ResponseCacheDescriptor, body []byte, conten
 	}
 	dir, err := root.Open(".")
 	if err == nil {
-		err = dir.Sync()
+		err = syncAppDirectory(dir)
 		dir.Close()
 	}
 	if err != nil {

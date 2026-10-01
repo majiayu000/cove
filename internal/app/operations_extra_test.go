@@ -224,10 +224,7 @@ func TestSpecBackupMetadataSnapshotAndRestore(t *testing.T) {
 	if originalCount != 1 {
 		t.Fatal("restore modified original bindings")
 	}
-	info, _ := os.Stat(target)
-	if info.Mode().Perm() != 0700 {
-		t.Fatal("restore directory is not private")
-	}
+	assertPrivateTestPermissions(t, target, 0700)
 }
 func TestSpecBackupRejectsInvalidArchiveAndTarget(t *testing.T) {
 	a := operationsApp(t)
@@ -619,5 +616,38 @@ func TestSpecBackupRejectsExecutableSchemaAndCleansExpiredArtifacts(t *testing.T
 	}
 	if _, err = os.Stat(folder); !os.IsNotExist(err) {
 		t.Fatal("maintenance did not delete expired artifact")
+	}
+}
+
+func TestSpecRestoreTargetTracksIdentityNotAccessTimes(t *testing.T) {
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "restore-target")
+	current := t.TempDir()
+	before, err := targetDirectoryHash(target, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(parent, changed, changed); err != nil {
+		t.Fatal(err)
+	}
+	after, err := targetDirectoryHash(target, current)
+	if err != nil || before != after {
+		t.Fatal("parent access/write time falsely invalidated restore preview", err)
+	}
+	moved := parent + "-replaced"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(moved)
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := targetDirectoryHash(target, current)
+	if err != nil || replaced == before {
+		t.Fatal("replaced parent directory retained restore authorization", err)
 	}
 }

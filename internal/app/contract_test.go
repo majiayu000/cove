@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -360,7 +361,7 @@ func TestContractLogoutDurableBeforeCleanup(t *testing.T) {
 	if err := a.Store.DB.Close(); err != nil {
 		t.Fatal(err)
 	}
-	dir := strings.TrimSuffix(file, "/gatt.db")
+	dir := filepath.Dir(file)
 	reopened, err := OpenStore(dir)
 	if err != nil {
 		t.Fatal(err)

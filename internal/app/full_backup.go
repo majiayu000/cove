@@ -389,7 +389,7 @@ func writeAgeArchive(ctx context.Context, path, passphrase string, manifest back
 	if err != nil {
 		return errors.New("age 加密归档失败；未发布完整备份")
 	}
-	if err = os.Rename(file.Name(), path); err != nil {
+	if err = replaceAppFile(file.Name(), path); err != nil {
 		return storageError()
 	}
 	return nil
@@ -802,7 +802,7 @@ func persistRestoreJSON(filename string, value any) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(file.Name(), filename)
+	return replaceAppFile(file.Name(), filename)
 }
 func PrepareRestoreSwitch(journalPath, pointerPath, expectedOldHash string, next RestorePointer) (RestoreSwitchJournal, error) {
 	var journal RestoreSwitchJournal

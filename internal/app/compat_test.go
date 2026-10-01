@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -666,6 +667,119 @@ func TestCompatCompletedItemsBounded(t *testing.T) {
 			if _, err := c.event(frame); (err != nil) != (index == 1) {
 				t.Fatalf("completed item aggregate size bound: index=%d err=%v", index, err)
 			}
+		}
+	}
+}
+
+func TestCompatNativeConversionFailurePreservesObservedUsage(t *testing.T) {
+	for _, path := range []string{"/v1/chat/completions", "/v1/responses"} {
+		for _, stream := range []bool{false, true} {
+			name := path + "/json"
+			wire := `{"id":"msg_usage","model":"fixture-model","content":[{"type":"thinking","thinking":"PRIVATE_THINKING","signature":"opaque"},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":17,"output_tokens":25}}`
+			contentType := "application/json"
+			if stream {
+				name = path + "/stream"
+				contentType = "text/event-stream"
+				wire = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_usage\",\"model\":\"fixture-model\",\"usage\":{\"input_tokens\":17}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"PRIVATE_THINKING\",\"signature\":\"opaque\"}}\n\n"
+			}
+			t.Run(name, func(t *testing.T) {
+				var calls atomic.Int32
+				a := contractApp(t, func(r *http.Request) (*http.Response, error) {
+					calls.Add(1)
+					return contractResponse(wire, contentType), nil
+				})
+				src, err := a.Store.source("source")
+				if err != nil {
+					t.Fatal(err)
+				}
+				src.NativeProtocol = "messages"
+				src.Provider = "anthropic"
+				if err = a.Store.saveSource(src); err != nil {
+					t.Fatal(err)
+				}
+				body := map[string]any{"model": "fixture-model", "max_tokens": 64, "messages": []map[string]string{{"role": "user", "content": "test"}}, "stream": stream}
+				if path == "/v1/responses" {
+					delete(body, "messages")
+					delete(body, "max_tokens")
+					body["input"] = "test"
+					body["max_output_tokens"] = 64
+				}
+				w := httptest.NewRecorder()
+				func() {
+					defer func() {
+						if p := recover(); p != nil && p != http.ErrAbortHandler {
+							panic(p)
+						}
+					}()
+					a.ServeHTTP(w, contractRequest("POST", path, encode(body), "test-client-key"))
+				}()
+				row := waitRecords(t, a, 1)[0]
+				if calls.Load() != 1 || row.Status != "failed" || row.ErrorStage != "protocol_conversion" || row.Usage.Input == nil || *row.Usage.Input != 17 {
+					t.Fatalf("conversion failure lost known input or changed error contract: %+v", row)
+				}
+				if stream {
+					if row.Usage.Output != nil || row.UpstreamStatus != "unknown" || row.Completeness != "partial" || row.ObservationStatus != "partial" {
+						t.Fatalf("unobserved terminal became known: %+v", row)
+					}
+				} else if w.Code != 502 || row.UpstreamStatus != "completed" || row.Usage.Output == nil || *row.Usage.Output != 25 || row.Completeness != "complete" {
+					t.Fatalf("JSON terminal usage lost: %+v", row)
+				}
+				if strings.Contains(encode(row), "PRIVATE_THINKING") || strings.Contains(w.Body.String(), "PRIVATE_THINKING") {
+					t.Fatal("opaque content leaked")
+				}
+			})
+		}
+	}
+}
+
+func TestCompatMessagesStreamCostRequiresObservedTerminal(t *testing.T) {
+	for _, path := range []string{"/v1/messages", "/v1/chat/completions", "/v1/responses"} {
+		for _, completed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/completed=%t", path, completed), func(t *testing.T) {
+				wire := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"model\":\"fixture-model\",\"usage\":{\"input_tokens\":17,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n"
+				if completed {
+					wire += "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+				}
+				var calls atomic.Int32
+				a := contractApp(t, func(r *http.Request) (*http.Response, error) {
+					calls.Add(1)
+					return contractResponse(wire, "text/event-stream"), nil
+				})
+				src, err := a.Store.source("source")
+				if err != nil {
+					t.Fatal(err)
+				}
+				src.NativeProtocol, src.Provider = "messages", "anthropic"
+				src.Price = &Price{Currency: "USD", Input: "1", Output: "1"}
+				if err = a.Store.saveSource(src); err != nil {
+					t.Fatal(err)
+				}
+				body := map[string]any{"model": "fixture-model", "max_tokens": 64, "messages": []map[string]string{{"role": "user", "content": "test"}}, "stream": true}
+				if path == "/v1/responses" {
+					delete(body, "messages")
+					delete(body, "max_tokens")
+					body["input"], body["max_output_tokens"] = "test", 64
+				}
+				func() {
+					defer func() {
+						if p := recover(); p != nil && p != http.ErrAbortHandler {
+							panic(p)
+						}
+					}()
+					a.ServeHTTP(httptest.NewRecorder(), contractRequest("POST", path, encode(body), "test-client-key"))
+				}()
+				row := waitRecords(t, a, 1)[0]
+				if calls.Load() != 1 || row.Usage.Input == nil || *row.Usage.Input != 17 || row.Usage.Output == nil {
+					t.Fatalf("observed usage lost or request replayed: %+v", row)
+				}
+				if completed {
+					if row.Status != "succeeded" || row.UpstreamStatus != "completed" || row.Completeness != "complete" || *row.Usage.Output != 4 || row.Cost == nil {
+						t.Fatalf("completed stream lost final accounting: %+v", row)
+					}
+				} else if row.Status == "succeeded" || row.UpstreamStatus != "unknown" || row.Completeness != "partial" || row.ObservationStatus != "partial" || *row.Usage.Output != 0 || row.Cost != nil || row.PartialCost == nil {
+					t.Fatalf("stream without terminal fabricated complete accounting: %+v", row)
+				}
+			})
 		}
 	}
 }

@@ -197,6 +197,25 @@ function App() {
     [requestQuery, setRequestQuery] = useState(""),
     [cursor, setCursor] = useState<string | null>(null);
   const detailRevision=useRef(0);
+  const [settingsEdits,setSettingsEdits]=useState<Partial<Record<"retention"|"limits",{version:number;formVersion:number;base:any;readError?:string}>>>({});
+  function beginSettingsEdit(kind:"retention"|"limits"){
+    setSettingsEdits(old=>old[kind]?old:{...old,[kind]:{version:settings.version,formVersion:settings.version,base:settings}});
+  }
+  async function saveSettingsEdit(kind:"retention"|"limits",changes:object){
+    const edit=settingsEdits[kind]??{version:settings.version,formVersion:settings.version,base:settings};
+    try{await api("settings","PATCH",{version:edit.version,changes})}
+    catch(error){
+      setSettingsEdits(old=>({...old,[kind]:edit}));
+      if((error as Error&{status?:number}).status===409){
+        try{const latest=await api("settings");setSettings((current:any)=>latest.version>=current.version?latest:current)}
+        catch(readError){setSettingsEdits(old=>({...old,[kind]:{...edit,readError:`无法读取当前设置：${(readError as Error).message}`}}))}
+      }
+      throw error;
+    }
+    setSettingsEdits(old=>{const next={...old};delete next[kind];return next});
+    await refresh();
+    setNotice(kind==="limits"?"新请求将使用新限制；在途请求保留原快照。":"清理影响预览已生成，确认后再应用。");
+  }
   const [editing, setEditing] = useState<Source | null>(null),
     [showAdd, setShowAdd] = useState(false),
     [form, setForm] = useState({
@@ -210,6 +229,7 @@ function App() {
       credential: "",
     });
   const sourceDialog=useRef<HTMLDialogElement>(null);
+  const [sourceConflict,setSourceConflict]=useState<Source|null>(null),[sourceConflictReadError,setSourceConflictReadError]=useState("");
   useEffect(()=>{
     const dialog=sourceDialog.current;
     if(!dialog)return;
@@ -341,13 +361,20 @@ function App() {
         .filter(Boolean),
       ...(editing ? { version: editing.version } : {}),
     };
-    await api(
+    try{await api(
       editing ? `sources/${editing.id}` : "sources",
       editing ? "PATCH" : "POST",
       data,
-    );
+    )}catch(error){
+      if(editing&&(error as Error&{status?:number}).status===409){
+        try{const latest=await api<Source>(`sources/${editing.id}`);setSourceConflict(latest);setSourceConflictReadError("")}
+        catch(readError){setSourceConflictReadError(`无法读取当前来源：${(readError as Error).message}`)}
+      }
+      throw error;
+    }
     setShowAdd(false);
     setEditing(null);
+    setSourceConflict(null);setSourceConflictReadError("");
     setForm({
       name: "",
       kind: "api_key",
@@ -362,6 +389,7 @@ function App() {
     setNotice("来源已保存，完成测试后才会显示已验证。");
   }
   function edit(s: Source) {
+    setSourceConflict(null);setSourceConflictReadError("");
     setEditing(s);
     setForm({
       name: s.name,
@@ -385,7 +413,7 @@ function App() {
   const apiProtocol=guideProtocols.includes(guideProtocol)?guideProtocol:(guideProtocols[0]||"responses");
   const apiPath = apiProtocol === "gemini" ? `/v1beta/models/${encodeURIComponent(selectedModel)}:streamGenerateContent?alt=sse` : apiProtocol === "chat_completions" ? "/v1/chat/completions" : apiProtocol === "messages" ? "/v1/messages" : "/v1/responses";
   const apiPayload = apiProtocol === "gemini" ? {contents:[{role:"user",parts:[{text:"Hello"}]}]} : apiProtocol === "responses"
-    ? { model: selectedModel, input: "Hello", stream: true, store: false }
+    ? { model: selectedModel, input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }], stream: true, store: false }
     : { model: selectedModel, messages: [{ role: "user", content: "Hello" }], stream: true, ...(apiProtocol === "messages" ? { max_tokens: 1024 } : {}) };
   const shellJSON = "'" + JSON.stringify(apiPayload, null, 2).replaceAll("'", "'\\''") + "'";
   const curlExample = `curl -N "http://${status.listen}${apiPath}" \\\n  -H "${apiProtocol === "gemini" ? "x-goog-api-key" : apiProtocol === "messages" ? "x-api-key" : "Authorization"}: ${apiProtocol === "messages" || apiProtocol === "gemini" ? "" : "Bearer "}$PERSONAL_GATEWAY_KEY" \\\n${apiProtocol === "messages" ? '  -H "anthropic-version: 2023-06-01" \\\n' : ""}  -H "Content-Type: application/json" \\\n  -d ${shellJSON}`;
@@ -447,7 +475,7 @@ function App() {
             disabled={busy}
             onClick={() =>
               page === "来源"
-                ? (setEditing(null),
+                ? (setEditing(null),setSourceConflict(null),setSourceConflictReadError(""),
                   setForm({
                     name: "",
                     kind: "api_key",
@@ -1328,18 +1356,11 @@ function App() {
               </dl>
               <form
                 className="inline-form"
+                onInput={()=>beginSettingsEdit("retention")}
                 onSubmit={(e) => {
                   e.preventDefault();
-                  run(async () => {
-                    await api("settings", "PATCH", {
-                      version: settings.version,
-                      changes:{retention_days: Number(
-                        new FormData(e.currentTarget).get("days"),
-                      )},
-                    });
-                    await refresh();
-                    setNotice("清理影响预览已生成，确认后再应用。");
-                  });
+                  const days=Number(new FormData(e.currentTarget).get("days"));
+                  void run(()=>saveSettingsEdit("retention",{retention_days:days}),"settings-retention");
                 }}
               >
                 <label>
@@ -1349,19 +1370,21 @@ function App() {
                     type="number"
                     min="1"
                     max="365"
+                    disabled={pendingActions.includes("settings-retention")}
                     defaultValue={settings.retention_days}
-                    key={settings.retention_days}
+                    key={settingsEdits.retention?.formVersion??settings.version}
                   />
                 </label>
-                <button className="secondary">保存</button>
+                <button className="secondary" disabled={pendingActions.includes("settings-retention")}>保存</button>
               </form>
+              {settingsEdits.retention&&(settingsEdits.retention.version!==settings.version||settingsEdits.retention.readError)&&<div role="region" aria-label="保留期版本冲突"><p>本地输入已保留。原保留期 {settingsEdits.retention.base.retention_days} 天；当前保留期 {settings.retention_days} 天，当前清理预览 {settings.retention_preview?.days??"无"} 天。</p>{settingsEdits.retention.readError&&<p role="alert">{settingsEdits.retention.readError}</p>}<button disabled={pendingActions.includes("settings-retention")||!!settingsEdits.retention.readError} onClick={()=>setSettingsEdits(old=>({...old,retention:{...old.retention!,version:settings.version,base:settings}}))}>使用当前版本，保留保留期输入</button><button disabled={pendingActions.includes("settings-retention")} onClick={()=>setSettingsEdits(old=>{const next={...old};delete next.retention;return next})}>放弃保留期修改</button></div>}
               {settings.retention_preview && <div><p>可清理 {settings.retention_preview.candidate_requests} 条旧请求；保护 {settings.retention_preview.protected_requests} 条运行、当前周期或待核对账务记录。</p><button className="danger" disabled={busy} onClick={()=>run(async()=>{await api("retention-cleanup","POST",{version:settings.version,days:settings.retention_preview.days});await refresh();setNotice("清理任务已提交，可在运维中查看结果。")})}>确认应用保留期并清理</button></div>}
               <p className="hint">
                 缩短保留期会清理旧记录，对应 response ID
                 将不能继续经此网关续接。
               </p>
             </section>
-            <section className="panel"><h2>新请求的运行限制</h2><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);run(async()=>{await api("settings","PATCH",{version:settings.version,changes:{max_concurrent:Number(f.get("max_concurrent")),idle_timeout_seconds:Number(f.get("idle")),total_timeout_seconds:Number(f.get("total"))}});await refresh();setNotice("新请求将使用新限制；在途请求保留原快照。")})}}><label>全局并发<input name="max_concurrent" type="number" min="1" defaultValue={settings.limits?.max_concurrent} key={settings.version}/></label><label>流空闲超时（秒）<input name="idle" type="number" min="1" defaultValue={settings.limits?.idle_timeout_seconds} key={"idle"+settings.version}/></label><label>请求总超时（秒）<input name="total" type="number" min="1" defaultValue={settings.limits?.total_timeout_seconds} key={"total"+settings.version}/></label><button disabled={busy}>保存运行限制</button></form><p>待重启设置：{JSON.stringify(settings.restart_required||{})}</p></section>
+            <section className="panel"><h2>新请求的运行限制</h2><form onInput={()=>beginSettingsEdit("limits")} onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void run(()=>saveSettingsEdit("limits",{max_concurrent:Number(f.get("max_concurrent")),idle_timeout_seconds:Number(f.get("idle")),total_timeout_seconds:Number(f.get("total"))}),"settings-limits")}}><label>全局并发<input name="max_concurrent" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.max_concurrent} key={settingsEdits.limits?.formVersion??settings.version}/></label><label>流空闲超时（秒）<input name="idle" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.idle_timeout_seconds} key={"idle"+(settingsEdits.limits?.formVersion??settings.version)}/></label><label>请求总超时（秒）<input name="total" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.total_timeout_seconds} key={"total"+(settingsEdits.limits?.formVersion??settings.version)}/></label><button disabled={pendingActions.includes("settings-limits")}>保存运行限制</button></form>{settingsEdits.limits&&(settingsEdits.limits.version!==settings.version||settingsEdits.limits.readError)&&<div role="region" aria-label="运行限制版本冲突"><p>本地输入已保留。原并发 {settingsEdits.limits.base.limits?.max_concurrent}、空闲/总超时 {settingsEdits.limits.base.limits?.idle_timeout_seconds}/{settingsEdits.limits.base.limits?.total_timeout_seconds}；当前并发 {settings.limits?.max_concurrent}、空闲/总超时 {settings.limits?.idle_timeout_seconds}/{settings.limits?.total_timeout_seconds}。</p>{settingsEdits.limits.readError&&<p role="alert">{settingsEdits.limits.readError}</p>}<button disabled={pendingActions.includes("settings-limits")||!!settingsEdits.limits.readError} onClick={()=>setSettingsEdits(old=>({...old,limits:{...old.limits!,version:settings.version,base:settings}}))}>使用当前版本，保留运行限制输入</button><button disabled={pendingActions.includes("settings-limits")} onClick={()=>setSettingsEdits(old=>{const next={...old};delete next.limits;return next})}>放弃运行限制修改</button></div>}<p>待重启设置：{JSON.stringify(settings.restart_required||{})}</p></section>
             <section className="panel">
               <h2>诊断与备份</h2>
               <p>
@@ -1510,7 +1533,8 @@ function App() {
               <p className="hint">
                 凭据保存在 Cove 私有目录。更换地址或凭据会使旧会话绑定失效；跨站更换地址必须提供新目标凭据。
               </p>
-              {error && <div className="error">{error}</div>}
+              {editing&&(sourceConflict||sourceConflictReadError)&&<div role="region" aria-label="来源版本冲突"><p>本地输入已保留。原版本 {editing.version}；当前版本 {sourceConflict?.version??"未读取"}。</p>{sourceConflict&&<><p>原名称 {editing.name}；当前名称 {sourceConflict.name}。</p><p>原地址 {editing.base_url}；当前地址 {sourceConflict.base_url}。</p><p>原模型 {editing.models.join(", ")}；当前模型 {sourceConflict.models.join(", ")}。</p><pre>{JSON.stringify({原配置:{kind:editing.kind,provider:editing.provider,native_protocol:editing.native_protocol,account_id:editing.account_id,proxy_url:editing.proxy_url,cloud_config:editing.cloud_config,allow_parameter_adjustment:editing.allow_parameter_adjustment},当前配置:{kind:sourceConflict.kind,provider:sourceConflict.provider,native_protocol:sourceConflict.native_protocol,account_id:sourceConflict.account_id,proxy_url:sourceConflict.proxy_url,cloud_config:sourceConflict.cloud_config,allow_parameter_adjustment:sourceConflict.allow_parameter_adjustment}},null,2)}</pre><p>当前凭据：{sourceConflict.credential_configured?"已配置":"未配置"}；绑定代次 {sourceConflict.binding_generation}。凭据内容不进入差异。</p></>}{sourceConflictReadError&&<p role="alert">{sourceConflictReadError}</p>}<button type="button" disabled={busy||!sourceConflict||!!sourceConflictReadError} onClick={()=>{setEditing(sourceConflict);setSourceConflict(null)}}>使用当前版本，保留来源输入</button><button type="button" disabled={busy||!sourceConflict||!!sourceConflictReadError} onClick={()=>{if(sourceConflict)edit(sourceConflict)}}>放弃来源修改</button>{sourceConflictReadError&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{const latest=await api<Source>(`sources/${editing.id}`);setSourceConflict(latest);setSourceConflictReadError("")})}>重新读取当前来源</button>}</div>}
+              {error && <div className="error" role="alert">{error}</div>}
               <button disabled={busy}>{busy ? "正在保存…" : "保存来源"}</button>
             </form>
           </dialog>

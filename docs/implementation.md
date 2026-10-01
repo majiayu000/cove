@@ -8,6 +8,25 @@
 
 ## “全部完成”目标的当前推进（2026-10-01）
 
+### 本轮交付版本对齐
+
+2026-10-01 独立审查后继续处理源码、开发包与校验文件的一致性。已恢复本地仓库与 `majiayu000/cove` 的提交关系，并保留远端 README 的 clone 快速入口；工作目录源码保留。Linux 原包内部文件哈希通过，外层 SHA-256 旁文件过期；Windows 原包内部文件哈希通过但缺少旁文件，均按实际压缩包重新生成。旁文件修复不代表旧包包含最新源码。
+
+同包 SDK 复跑发现 Messages 开始事件的 `output_tokens=0` 在取消/流截断后被计成完整费用；原失败报告保留于 `test-results/delivery-20261001/iteration-845990ea/mac-sdk.json`。已新增原生 Messages 及 Responses/Chat 转换的六项终态回归：未观测终态保留实际已知用量、标记 partial、完整费用保持未知并仅列已知部分费用；收到正式完成仍正常结算，不改变失败/取消或不重放合同。修复前后证据分别是 `cancel-cost-before.log` 与 `cancel-cost-after.log`，最终整包结果另见本轮汇总。
+
+本轮最终结果统一记录于 `test-results/delivery-20261001/final-checks.json`：按当前冻结源码重建原生开发包，分别记录完整 race、静态检查、SDK、网页、生命周期及平台可用性。报告未生成、命令未完成或来源/产物哈希不匹配的检查不计通过。既有真实订阅和 1800 秒性能报告仍属于旧 `b9cf` 构建，不迁移为新包证据。
+
+剩余完整产品验收包括：真实订阅经 Claude Code 的工具执行及最终回复、长历史/并行/WS/compact、真实提供方严格预算成功路径、额外 OAuth 提供方与各客户端 MCP/Skills 实际加载，以及剩余表单流程和 Windows 实际登录/断电。外部注册合同与未知计费规则需提供方证据；本轮交付对齐不将这些项目改为完成。
+
+
+最新完成的冻结包是 `b9cf1d595a13…`，[同源码三平台汇总](../test-results/goal-platform-final-checks.json)已核对三包42项文件哈希：Mac race314/630、Linux314/630及Windows316/632通过，Linux/Windows各跳过两项外部CLI；Mac已安装两项CLI实际启用。Mac/Windows网页各43项、SDK34项、Mac/Linux生命周期各7项、真实launchd8项、Windows计划任务10项和Linux user-systemd10项通过。同包真实订阅主流程三协议工具回合、网页Key、Codex0.159.2最终回复和用量对账通过；保留两条上游已完成后的CLI本地取消。Mac同包1800秒/8流/100万记录五项性能门槛通过。Windows另完成实际旧包到此包的手动更新8项核验，SQLite及凭据保持一致，测试进程清理；实际登录触发和物理断电仍未验。
+
+当前源码又补了R072缓存/通知草稿、409差异/显式重提/放弃、通知提醒独立等待和重复保护、这两个模块的字段错误关联/焦点返回。[48项网页源码迭代](../test-results/goal-ui-cache-notification-accessibility.json)通过，[缓存原复现](../test-results/goal-ui-cache-before-final.log)保留。其后真实本机智谱API的Messages JSON/SSE已返回实际文本；转换拒绝同时丢失已知usage的问题由[相关race](../test-results/goal-glm-conversion-usage-related-retest.log)覆盖并修复，正式终态与转换失败分开记录，未知终态不改成完成。该Go变化及新UI尚未替换已验的b9cf三平台包，真实复验以各报告实际结果为准，不能把旧包性能或平台证据标成新源码最终验收。
+
+后续[50项网页源码迭代](../test-results/goal-ui-keyboard-zoom.json)也通过：覆盖10页可见且启用控件的Tab/Enter导航，并在独立临时Chrome配置以实际浏览器200%缩放验证10页无横向溢出；并未替代所有展开编辑流程的键盘验收。用量修复后的[完整Mac race](../test-results/goal-glm-known-usage-full-race.json)315个顶层/635项含子用例、零跳过通过，静态检查通过。[本机既有智谱凭据的原生Messages JSON/SSE复验](../test-results/goal-real-local-glm-native-final.json)通过；仅保留枚举、用量、终态与元数据，临时凭据/实例已删除。实际响应包含带签名thinking，因此跨协议仍按合同拒绝；[完整三协议探测](../test-results/goal-real-local-glm-source.json)仍为失败，不能写成三协议已支持。该报告同时证明已知JSONusage现在保留、未观测到正式流终态仍为partial。
+
+以下段落保留各轮历史证据与当时未完成项；当前全项结论仍为开发预览。已有本机客户端凭据、已安装客户端登录、Cove独立OAuth注册和严格预算提供方资格分别记录。[本机来源元数据](../test-results/goal-local-provider-metadata-inventory.json)只读取公开配置及凭据是否存在，没有导出凭据。日常5569进程未停止或修改。
+
 用户已指定先完成 Mac 验收，Linux 使用 Docker，Windows 使用另一台电脑。当前目标持续推进；没有把外部条件不足的项目改成完成。除原审查三项之外，本轮还修复：TPM 的 Retry-After 等到足够容量释放；普通 API 来源编辑不再误算云端点；launchd 安装先准备0700数据/日志目录；来源、账号、模型发现、Key和预算不冻结无关对象；路由/模型变更刷新父级数据，Key权限表单保留编辑版本，冲突由用户明确选择重提；来源弹窗使用原生dialog处理键盘、Esc和焦点返回；Anthropic beta仅在原生Messages及模型明确声明 `anthropic_beta:<tag>` 时传递，转换和未声明组合仍返回422。
 
 前一冻结构建 `7d5d9ba06cdf…` 已完成 Mac 297 个顶层测试、537 个含子用例、零跳过；SDK 34/34、网页、生命周期和当前用户 launchd 均通过。同包 1800 秒、8 流、100 万记录性能五项门槛通过：附加 TTFT P95 1.015ms、查询 P95 1.169ms、RSS 增长 7056KiB、取消释放 0.0098 秒，见[前一包汇总](../test-results/goal-phase2-final-checks.json)与[性能报告](../test-results/goal-phase2-performance.json)。Linux arm64 同源码原生 CGO 构建、完整 race、静态检查、生命周期和未安装 Go/Node/GCC 的独立 Debian 容器运行通过，见[Linux 汇总](../test-results/goal-linux-final-checks.json)。Linux 三项跳过是 Darwin 实际更新助手和容器未安装的两种 CLI；普通容器本身没有证明 systemd 用户会话。后续新增独立 systemd 容器，实际用户管理器验收见下文。此前并发 401 测试缺少屏障，已修复测试并在 Mac/Linux 各连续 20 次 race 通过；生产刷新代码未变。
@@ -20,15 +39,21 @@ Linux 实际 systemd 用户服务首次发现 `WorkingDirectory` 引号被当作
 
 UI 状态收尾已复现三项此前缺口：无关预算刷新覆盖未保存上限（31→32）、慢诊断禁用配置导出、一个后台任务取消禁用其他任务。修复前分别见[预算](../test-results/goal-ui-budget-before.log)、[运维](../test-results/goal-ui-operations-before.log)、[资源](../test-results/goal-ui-resource-before.log)。预算保留编辑版本/输入，409读取当前值并显示差异，只有明确选择当前版本后重新提交；运维/任务使用各自等待和重复提交保护，旧轮询与旧创建响应不覆盖较新状态。四项专项在[源码迭代浏览器报告](../test-results/goal-ui-state-browser.json)通过；任务与慢请求部分管理回复使用替身，只证明UI状态，不代替后台提供方实验。另新增375/390/768/1280和十页字段标签检查，修复768px Key行按钮溢出、一个label包两个权限控件以及缺少名称的Key/用量控件；[本轮最终网页报告](../test-results/goal-ui-final-browser.json)未产生或失败时不计通过。后续在旧包再次复现[账号名称草稿丢失](../test-results/goal-ui-account-before-retest.json)与[Key限额草稿丢失](../test-results/goal-ui-key-before.json)。账号名称/凭据、Key权限、模型元数据和路由配置现保留独立编辑版本/输入，409读取当前值并展示差异，只有用户明确选择当前版本后重提；放弃修改读取当前值。凭据差异只显示版本、代次和配置状态，成功后清空输入。四类实体专项先通过，整套脚本在新增辅助模型引起的导入fixture数量断言失败，修正fixture隔离后[源码迭代整套网页报告](../test-results/goal-ui-entities-browser-final.json)通过；较早失败报告保留。模型元数据保存后价格失败会明确显示已完成部分，并保留输入和原错误。[本轮包网页报告](../test-results/goal-entities-final-browser.json)需核对实际结果与BuildID。来源/设置等表单、完整键盘、错误字段关联与200%缩放仍按R072保留。后续在该包[复现客户端全局等待](../test-results/goal-ui-client-focused-before-corrected.log)：A恢复预览暂停，B记录被禁用。客户端历史/配置/检测现使用独立等待、同步重复提交保护及分别的选择版本，旧恢复预览不能覆盖新记录；错误仍保留原消息。该UI修改的[源码迭代两项专项](../test-results/goal-ui-client-focused-source.json)通过：A慢恢复不阻塞B、旧回复不覆盖新预览，慢检测不阻塞配置预览，重复submit仅派发一次。初次测试选错导航/下拉框的失败日志保留。[本轮整套网页](../test-results/goal-ui-client-final-browser.json)及[同包汇总](../test-results/goal-ui-client-final-checks.json)需读取实际结果，未产生或失败不计通过；管理回复使用明确替身，不涉及实际客户端文件。
 
-Windows 接入已从此前Codex记录恢复，实际连接为 `Administrator@100.81.107.120`，只在进程内传入认证。[环境清单](../test-results/goal-windows-current-inventory.json)确认Windows 11专业版64位；starlight实际为Darwin，不能作为Windows证据。原有客户端配置与任务不改动，实机验收结果未产生或失败时不计通过。
+Windows 接入已从此前Codex记录恢复，实际连接为 `Administrator@100.81.107.120`，只在进程内传入认证。[环境清单](../test-results/goal-windows-current-inventory.json)确认Windows 11专业版64位；starlight实际为Darwin，不能作为Windows证据。验收仅使用独立临时目录、便携Go/LLVM工具链和可清理的本人计划任务。Windows原生CGO构建与包闭包校验已通过；[服务源码迭代报告](../test-results/goal-windows-service-source-v5.json)八项通过，含安装不启动、PID/端口/build、内置网页、最低权限任务配置、冲突保护、停启和卸载保留数据，任务已删除。该报告未证明实际登录触发或无Node的全新电脑。实机修复了本地化任务查询、UTF-16任务XML、导出省略RunLevel、exe更新路径、Windows原生ACL/磁盘容量、稳定目录身份及HTTP路径分隔符。此前完整Windows测试失败仍保留，完整race、真实更新助手和最终同包尚待读取新结果；不能以构建或服务通过替代这些验收。
 
-逐模型文本验证还发现一个独立假阳性：订阅来源的空完成事件和只有函数参数的流均可被标记文本通过。[修复前日志](../test-results/goal-model-text-before.log)覆盖三协议的JSON/SSE；现从有界验证输出读取实际文本，不把工具参数或成功传输当作文本。上游请求成功、usage和逐项失败结果的合同保持原样。[定向race](../test-results/goal-model-text-after.log)通过，属于源码迭代，尚需新冻结包真实验证。
+逐模型文本验证还发现一个独立假阳性：订阅来源的空完成事件和只有函数参数的流均可被标记文本通过。[修复前日志](../test-results/goal-model-text-before.log)覆盖三协议的JSON/SSE；现从有界验证输出读取实际文本，不把工具参数或成功传输当作文本。上游请求成功、usage和逐项失败结果的合同保持原样。[定向race](../test-results/goal-model-text-after.log)通过。随后旧冻结包的真实验证被上游400拒绝；[请求形状诊断](../test-results/goal-model-text-request-shape.json)确认订阅Responses要求消息数组，字符串输入失败。来源测试与逐模型验证现构造标准input_text消息数组，不修改用户原生请求。上述属于源码迭代，新冻结包真实六项文本验证未产生或失败时不计通过。
+
+本轮Windows原生源码迭代的[完整race](../test-results/goal-windows-native-race-v9-summary.json)已通过：314个顶层、630项含子用例，2项外部CLI未运行；包含真实临时更新子进程的关闭准入、健康核验及激活，管理器查询仍为替身。Windows的真实任务生命周期由前述独立报告证明。最终客户端ACL通过重新打开同一文件对象取得READ_CONTROL/WRITE_DAC，保留os.Root目录约束；写入的客户端配置和Skills文件不授予执行权限。[定向实机修复日志](../test-results/goal-windows-client-acl-read-control.jsonl)与此前失败记录均保留。断电与实际登录触发尚未完成，不能由race推导。
+
+[来源与设置源码迭代网页报告](../test-results/goal-ui-source-settings-after.json)共43项通过。新增来源409差异/显式重提/放弃，运行限制及保留期保留编辑版本和草稿；[设置复现](../test-results/goal-ui-settings-before-retest.log)确认刷新将4覆盖为5，[来源复现](../test-results/goal-ui-source-cas-before.log)确认只有错误提示而没有差异选择。缓存/通知的同类状态、字段错误关联、完整键盘/200%与导航草稿仍需独立核验，不计R072全部完成。
+
+`c725b4f2f7f4…` [Mac冻结包检查](../test-results/goal-three-platform-mac-final-checks.json)已完成314个顶层/630项含子用例、零跳过，40项网页、34项SDK及7项生命周期；[真实六项文本验证](../test-results/goal-three-platform-real-text-verification.json)通过。旧验收脚本两次将CLI在上游正式完成之后关闭HTTP判为整轮失败，两个原报告保留；三协议工具和用量对账实际通过。数据库只读检查确认取消请求的upstream_status为completed、observation及usage完整、delivery为partial，符合已定义取消合同。新脚本增加独立CLI最终答复断言，只在这些证据均成立时接纳此客户端终态，同时报告原取消状态；不修改生产失败/取消合同。网页Responses示例也使用上游已验证接受的input_text消息数组。本轮新冻结包以[三平台Mac汇总](../test-results/goal-platform-final-checks.json)为准；真实结果、Windows/Linux同源码产物及性能报告未产生或失败时不计通过。
 
 同一冻结包的最新结果由[汇总报告](../test-results/goal-final-checks.json)记录。新增严格预算改动需要新包的完整检查，前一包的绿色结果不会用于证明新包。报告未产生、命令非零、BuildID/hash 不匹配或门槛未全通过时不计验收；源码迭代证据不代替同包检查。
 
 独立5572实例已完成本人Cove OAuth，实际目录返回9个模型；在网页启用gpt-5.6-luna并创建Key，一次性明文刷新后消失。`c9c12bcf5ce7…` 的[真实主流程首次报告](../test-results/goal-entities-real-live-retest.json)中，Codex CLI 0.159.2实际执行本地printf工具并完成最终答复，5条请求的实际usage与汇总一致；三协议专项虽然均返回200，但未通过工具断言，整份报告仍失败。不能将200视作工具验收通过。
 
-[真实流诊断](../test-results/goal-real-tool-stream-diagnostic.json)确认完整add调用在 `response.output_item.done` 中，正式完成事件的output为空数组。转换器与验收客户端已补读完成输出项，仍要求正式终态，并限制累计大小、索引、重复完成及终态/已发送内容冲突；原生Responses线数据保持直传。[官方Codex解析器](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/sse/responses.rs)分别消费完成项与完成事件。定向检查以[实际日志](../test-results/goal-real-output-focused.log)为准；`7cc37314a390…` [修复包真实报告](../test-results/goal-real-output-live.json)三协议两轮、网页Key及实际Codex CLI均通过，8条成功请求的15287输入/359输出token与汇总相符；订阅费用保持unknown。此包34项官方SDK合成、38项网页、完整race（首次两CLI被错误环境变量跳过，单独正确启用后两项补测通过）见[同包汇总](../test-results/goal-real-output-checks.json)。该包之后的UI修改属于下一源码迭代，不能沿用其BuildID宣称新包已验收。较早的测试fixture错误与失败日志保留。真实报告继续使用 `scripts/verify-live.mjs`；未登录或空cases不算通过。Windows连接方式、自有OAuth注册和其余供应商成功合同尚未提供；D01-D03 与 E01-E10、严格预算真实提供方实验、其余模块专项验收仍按台账保留。
+[真实流诊断](../test-results/goal-real-tool-stream-diagnostic.json)确认完整add调用在 `response.output_item.done` 中，正式完成事件的output为空数组。转换器与验收客户端已补读完成输出项，仍要求正式终态，并限制累计大小、索引、重复完成及终态/已发送内容冲突；原生Responses线数据保持直传。[官方Codex解析器](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/sse/responses.rs)分别消费完成项与完成事件。定向检查以[实际日志](../test-results/goal-real-output-focused.log)为准；`7cc37314a390…` [修复包真实报告](../test-results/goal-real-output-live.json)三协议两轮、网页Key及实际Codex CLI均通过，8条成功请求的15287输入/359输出token与汇总相符；订阅费用保持unknown。此包34项官方SDK合成、38项网页、完整race（首次两CLI被错误环境变量跳过，单独正确启用后两项补测通过）见[同包汇总](../test-results/goal-real-output-checks.json)。该包之后的UI修改属于下一源码迭代，不能沿用其BuildID宣称新包已验收。较早的测试fixture错误与失败日志保留。真实报告继续使用 `scripts/verify-live.mjs`；未登录或空cases不算通过。Windows连接已恢复；自有OAuth注册和其余供应商成功合同仍待补齐；D01-D03 与 E01-E10、严格预算真实提供方实验、其余模块专项验收仍按台账保留。
 
 ## 本次审查修复与同一构建复验（2026-09-30）
 

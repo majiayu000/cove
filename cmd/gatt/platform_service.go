@@ -58,7 +58,14 @@ func (e platformEnvironment) serviceDocument() ([]byte, error) {
 		for i, arg := range args {
 			quoted[i] = windowsArg(arg)
 		}
-		return []byte(`<?xml version="1.0" encoding="UTF-8"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>` + xmlText(e.UserID) + `</UserId></LogonTrigger></Triggers><Principals><Principal id="CoveUser"><UserId>` + xmlText(e.UserID) + `</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="CoveUser"><Exec><Command>` + xmlText(e.Executable) + `</Command><Arguments>` + xmlText(strings.Join(quoted, " ")) + `</Arguments><WorkingDirectory>` + xmlText(filepath.Dir(e.Executable)) + `</WorkingDirectory></Exec></Actions></Task>` + "\n"), nil
+		document := `<?xml version="1.0" encoding="UTF-16"?><Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Triggers><LogonTrigger><Enabled>true</Enabled><UserId>` + xmlText(e.UserID) + `</UserId></LogonTrigger></Triggers><Principals><Principal id="CoveUser"><UserId>` + xmlText(e.UserID) + `</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings><Actions Context="CoveUser"><Exec><Command>` + xmlText(e.Executable) + `</Command><Arguments>` + xmlText(strings.Join(quoted, " ")) + `</Arguments><WorkingDirectory>` + xmlText(filepath.Dir(e.Executable)) + `</WorkingDirectory></Exec></Actions></Task>` + "\n"
+		units := utf16.Encode([]rune(document))
+		encoded := make([]byte, 2+len(units)*2)
+		encoded[0], encoded[1] = 0xff, 0xfe
+		for i, unit := range units {
+			binary.LittleEndian.PutUint16(encoded[2+i*2:], unit)
+		}
+		return encoded, nil
 	}
 	return nil, fmt.Errorf("用户服务不支持平台 %s", e.OS)
 }
@@ -150,7 +157,7 @@ func (e platformEnvironment) managerStatus(ctx context.Context) (bool, int, stri
 		}
 		return true, pid, props["ActiveState"], nil
 	case "windows":
-		script := `$ErrorActionPreference='Stop'; $tasks=@(Get-ScheduledTask -ErrorAction Stop | Where-Object {$_.TaskName -eq $inputData.task_name -and $_.TaskPath -eq '\'}); if($tasks.Count -eq 0){@{exists=$false} | ConvertTo-Json -Compress} else {if($tasks.Count -ne 1){throw 'Ambiguous task'}; $document=[xml](Export-ScheduledTask -TaskName $inputData.task_name -TaskPath '\' -ErrorAction Stop); @{exists=$true; document=$document.DocumentElement.OuterXml; state=[int]$tasks[0].State} | ConvertTo-Json -Compress}`
+		script := `$ErrorActionPreference='Stop'; $tasks=@(Get-ScheduledTask -ErrorAction Stop | Where-Object {$_.TaskName -eq $inputData.task_name -and $_.TaskPath -eq '\'}); if($tasks.Count -eq 0){@{exists=$false} | ConvertTo-Json -Compress} else {if($tasks.Count -ne 1){throw 'Ambiguous task'}; $document=[xml](Export-ScheduledTask -TaskName $inputData.task_name -TaskPath '\' -ErrorAction Stop); @{exists=$true; document=$document.DocumentElement.OuterXml; state=[int]$tasks[0].State; run_level=[int]$tasks[0].Principal.RunLevel} | ConvertTo-Json -Compress}`
 		output, err := e.Run(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", powershellEncoded(script, map[string]any{"task_name": e.taskName()}))
 		if err != nil {
 			return owned, 0, "unknown", err
@@ -159,6 +166,7 @@ func (e platformEnvironment) managerStatus(ctx context.Context) (bool, int, stri
 			Exists   *bool  `json:"exists"`
 			Document string `json:"document"`
 			State    int    `json:"state"`
+			RunLevel *int   `json:"run_level"`
 		}
 		if json.Unmarshal(output, &query) != nil || query.Exists == nil {
 			return owned, 0, "unknown", fmt.Errorf("计划任务未返回有效查询结果")
@@ -173,9 +181,17 @@ func (e platformEnvironment) managerStatus(ctx context.Context) (bool, int, stri
 		if err = xml.Unmarshal([]byte(query.Document), &actual); err != nil {
 			return true, 0, "unknown", fmt.Errorf("计划任务返回无效 XML: %w", err)
 		}
+		if query.RunLevel == nil || *query.RunLevel != 0 {
+			return true, 0, "conflict", fmt.Errorf("计划任务不是可核验的最低权限任务，拒绝覆盖/停止")
+		}
+		// Windows omits the default RunLevel from exported XML. The CIM value
+		// above independently confirms LUA before normalizing that omission.
+		if actual.Principals.Principal.RunLevel == "" {
+			actual.Principals.Principal.RunLevel = "LeastPrivilege"
+		}
 		expectedBytes, _ := e.serviceDocument()
 		var expected windowsTask
-		_ = xml.Unmarshal(expectedBytes, &expected)
+		_ = xml.Unmarshal([]byte(windowsTaskText(expectedBytes)), &expected)
 		actualJSON, _ := json.Marshal(actual)
 		expectedJSON, _ := json.Marshal(expected)
 		if !owned || string(actualJSON) != string(expectedJSON) {
@@ -370,4 +386,13 @@ func powershellEncoded(script string, data any) string {
 		binary.LittleEndian.PutUint16(encoded[i*2:], unit)
 	}
 	return base64.StdEncoding.EncodeToString(encoded)
+}
+
+// Decode our UTF-16LE task document for identity comparison with the exported XML.
+func windowsTaskText(document []byte) string {
+	units := make([]uint16, (len(document)-2)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(document[2+i*2:])
+	}
+	return strings.Replace(string(utf16.Decode(units)), `encoding="UTF-16"`, `encoding="UTF-8"`, 1)
 }

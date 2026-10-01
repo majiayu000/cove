@@ -107,7 +107,7 @@ func writePrivate(path string, data []byte) error {
 	}
 	temporary := file.Name()
 	defer os.Remove(temporary)
-	if err = file.Chmod(0600); err == nil {
+	if err = protectPlatformPath(temporary, 0600); err == nil {
 		_, err = file.Write(data)
 	}
 	if err == nil {
@@ -119,10 +119,7 @@ func writePrivate(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(temporary, path); err != nil {
-		return err
-	}
-	return syncPlatformDirectory(filepath.Dir(path))
+	return replacePlatformFile(temporary, path)
 }
 func fileSHA(path string) (string, error) {
 	file, err := os.Open(path)

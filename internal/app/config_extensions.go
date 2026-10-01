@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	urlpath "path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -418,7 +419,7 @@ func extensionSkillsPreview(in extensionInput, card extensionCard) ([]extensionF
 	var files []extensionFile
 	var skillName string
 	for _, relative := range in.Files {
-		if !filepath.IsLocal(relative) || filepath.Clean(relative) != relative || relative == "." || seen[relative] {
+		if !filepath.IsLocal(relative) || urlpath.Clean(relative) != relative || relative == "." || seen[relative] {
 			return nil, extensionError(400, "文件清单包含重复或越界路径", "files")
 		}
 		seen[relative] = true

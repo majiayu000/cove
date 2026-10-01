@@ -143,7 +143,7 @@ func (a *App) localRoot() (string, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", storageError()
 	}
-	if err = os.Chmod(root, 0700); err != nil {
+	if err = protectAppPath(root, 0700); err != nil {
 		return "", storageError()
 	}
 	return root, nil
@@ -741,11 +741,11 @@ func targetDirectoryHash(target, current string) (string, error) {
 	if err != nil || resolved != parent {
 		return "", errors.New("目标父目录必须存在且不能含符号链接")
 	}
-	info, err := os.Stat(parent)
-	if err != nil || !info.IsDir() {
+	identity, err := appDirectoryIdentity(parent)
+	if err != nil {
 		return "", errors.New("目标父目录不可用")
 	}
-	return digest(target + "\x00" + fmt.Sprint(info.Sys())), nil
+	return digest(target + "\x00" + identity), nil
 }
 func unpackMetadataArchive(ctx context.Context, reader io.Reader, folder string) (backupManifest, error) {
 	limited := &io.LimitedReader{R: reader, N: backupArchiveLimit + 1}
@@ -947,6 +947,10 @@ func (a *App) restoreApplyAPI(w http.ResponseWriter, r *http.Request) {
 			os.RemoveAll(p.TargetDir)
 		}
 	}()
+	if err = protectAppPath(p.TargetDir, 0700); err != nil {
+		fail(w, 503, "无法设置目标目录私有权限；原目录保留", "target_dir")
+		return
+	}
 	if err = copyPrivateFile(filepath.Join(folder, "db.sqlite"), filepath.Join(p.TargetDir, "gatt.db")); err != nil {
 		fail(w, 503, "恢复复制失败；原目录保留", "")
 		return

@@ -23,9 +23,7 @@ func clientFixture(t *testing.T) *fixture {
 	bin := t.TempDir()
 	versions := map[string]string{"codex": "codex-cli 0.158.0", "claude": "2.1.281 (Claude Code)", "opencode": "1.18.33"}
 	for name, version := range versions {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
+		installClientVersionFixture(t, bin, name, version)
 	}
 	t.Setenv("PATH", bin)
 	for _, key := range []string{"CODEX_HOME", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR"} {
@@ -157,10 +155,7 @@ func TestSpecClientConfig(t *testing.T) {
 					t.Fatalf("field %v not applied: %q %v", field.Path, value, err)
 				}
 			}
-			info, err := os.Stat(path)
-			if err != nil || info.Mode().Perm() != 0600 {
-				t.Fatal("applied config is not 0600")
-			}
+			assertPrivateTestPermissions(t, path, 0600)
 			if tc.kind != "claude" && (!strings.Contains(string(b), "user comment") || !strings.Contains(string(b), "model comment")) {
 				t.Fatal("comments lost")
 			}
@@ -401,9 +396,7 @@ func TestSpecClientConfigBlocksOverridesAndUnknownVersion(t *testing.T) {
 		t.Fatal("environment blocker leaked or missed")
 	}
 	t.Setenv("ANTHROPIC_MODEL", "")
-	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "claude"), []byte("#!/bin/sh\nprintf '%s\\n' '99.0.0'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	installClientVersionFixture(t, os.Getenv("PATH"), "claude", "99.0.0")
 	status, b = clientRequest(t, f.a, "/admin/clients/claude/preview", clientConfigInput{Scope: "project", Root: root, Path: path, Model: "coding"})
 	if status != 200 || !strings.Contains(string(b), "unsupported_version") {
 		t.Fatal("unknown version applied template")

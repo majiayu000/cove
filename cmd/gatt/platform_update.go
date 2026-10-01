@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -86,7 +87,11 @@ func readDataSchema(dir string) (int, error) {
 	} else if err != nil {
 		return 0, err
 	}
-	uri := &url.URL{Scheme: "file", Path: filepath.ToSlash(filename)}
+	uriPath := filepath.ToSlash(filename)
+	if filepath.VolumeName(filename) != "" {
+		uriPath = "/" + uriPath
+	}
+	uri := &url.URL{Scheme: "file", Path: uriPath}
 	query := url.Values{"mode": {"ro"}, "_query_only": {"on"}}
 	uri.RawQuery = query.Encode()
 	db, err := sql.Open("sqlite3", uri.String())
@@ -312,6 +317,9 @@ func (e platformEnvironment) prepareUpdate(filename, expectedSHA string) (string
 			_ = os.RemoveAll(stage)
 		}
 	}()
+	if err = protectPlatformPath(stage, 0700); err != nil {
+		return "", err
+	}
 	for name, data := range files {
 		if name == "manifest.json" {
 			continue
@@ -350,7 +358,7 @@ func readUpdateJournal(filename string, e platformEnvironment) (updateJournal, e
 	if err != nil {
 		return journal, err
 	}
-	if !info.Mode().IsRegular() || e.OS != "windows" && info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		return journal, fmt.Errorf("更新 journal 必须是私有普通文件")
 	}
 	file, err := os.Open(filename)
@@ -371,7 +379,7 @@ func readUpdateJournal(filename string, e platformEnvironment) (updateJournal, e
 		return journal, fmt.Errorf("journal 路径/配置/数据目录不符")
 	}
 	stageInfo, err := os.Lstat(journal.Stage)
-	if err != nil || !stageInfo.IsDir() || stageInfo.Mode()&os.ModeSymlink != 0 || e.OS != "windows" && stageInfo.Mode().Perm()&0077 != 0 {
+	if err != nil || !stageInfo.IsDir() || stageInfo.Mode()&os.ModeSymlink != 0 || runtime.GOOS != "windows" && stageInfo.Mode().Perm()&0077 != 0 {
 		return journal, fmt.Errorf("暂存目录不是私有真实目录")
 	}
 	return journal, nil

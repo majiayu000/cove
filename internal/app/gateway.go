@@ -993,6 +993,12 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 			}
 			rec.ErrorSummary = "本地传输已结束，上游执行与最终费用可能未知"
 		}
+		// Interim usage (including Messages' initial output_tokens=0) is
+		// observable, but cannot settle the full cost without a provider terminal.
+		if rec.UpstreamStatus == "unknown" {
+			rec.ObservationStatus = "partial"
+			observationSkipped = true
+		}
 		rec.Completeness = usageCompleteness(rec.Usage)
 		if observationSkipped && rec.Completeness == "complete" {
 			rec.Completeness = "partial"
@@ -1001,7 +1007,9 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 			zero := "0"
 			rec.Cost = &zero
 		} else if src.Kind != "codex_subscription" {
-			rec.Cost = estimate(rec.Usage, rec.Price)
+			if rec.Completeness == "complete" {
+				rec.Cost = estimate(rec.Usage, rec.Price)
+			}
 			if rec.Cost == nil {
 				rec.PartialCost = estimatePartial(rec.Usage, rec.Price)
 			}
@@ -1525,9 +1533,28 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 				observed, e = nativeMetadata(b, src.NativeProtocol)
 			} else {
 				observed, e = nativeJSON(b, src.NativeProtocol)
-				b = observed
+				if e == nil {
+					b = observed
+				}
 			}
 			if e != nil {
+				// Conversion can reject opaque content after the provider has
+				// already completed and reported billable usage.
+				if src.NativeProtocol == "messages" || src.NativeProtocol == "chat_completions" {
+					if metadata, metadataErr := nativeMetadata(b, src.NativeProtocol); metadataErr == nil {
+						if observeErr := observe(metadata, ""); observeErr != nil {
+							rec.Status = "failed"
+							fail(w, 503, storageError().Error(), "")
+							return
+						}
+					} else {
+						var payload map[string]json.RawMessage
+						_ = json.Unmarshal(b, &payload)
+						mergeNativeUsage(&rec.Usage, payload["usage"], src.NativeProtocol)
+						rec.ObservationStatus = "partial"
+						observationSkipped = true
+					}
+				}
 				rec.Status = "failed"
 				rec.ErrorStage = "protocol_conversion"
 				fail(w, 502, "原生响应缺少合法终态或无法转换", "")
@@ -1693,11 +1720,19 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 			now := time.Now().UTC()
 			rec.FirstContentAt = &now
 		}
-		if e := native.frame(frame); e != nil {
-			return e
+		frameErr := native.frame(frame)
+		rec.Usage = native.usage
+		if frameErr != nil {
+			if rec.ErrorStage == "" {
+				rec.ErrorStage = "protocol_conversion"
+			}
+			if !native.terminal {
+				rec.ObservationStatus = "partial"
+				observationSkipped = true
+			}
+			return frameErr
 		}
 		if nativeDirect {
-			rec.Usage = native.usage
 			if native.terminal {
 				payload := []byte(encode(native.response))
 				if e := observe(payload, ""); e != nil {

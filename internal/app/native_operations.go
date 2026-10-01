@@ -17,6 +17,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
+	urlpath "path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -88,7 +89,7 @@ func nativePath(src Source, op nativeOperationSpec) (string, error) {
 	}
 	path := src.RerankPath
 	u, err := url.Parse(path)
-	if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || u.IsAbs() || u.Host != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(path, "\\") || filepath.Clean(path) != path || strings.Contains(path, "..") || strings.ContainsAny(path, "\r\n") {
+	if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || u.IsAbs() || u.Host != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(path, "\\") || urlpath.Clean(path) != path || strings.Contains(path, "..") || strings.ContainsAny(path, "\r\n") {
 		return "", errors.New("rerank 原生路径未配置或不是受控相对路径")
 	}
 	return path, nil

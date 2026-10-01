@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -443,7 +444,7 @@ func (launcher *platformRestoreLauncher) activate(ctx context.Context, pointer a
 }
 func (env platformEnvironment) applyRestore(ctx context.Context, journalPath string, spawn platformRestoreSpawn) error {
 	info, err := os.Lstat(journalPath)
-	if err != nil || !info.Mode().IsRegular() || env.OS != "windows" && info.Mode().Perm()&0077 != 0 {
+	if err != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		return errors.New("恢复 journal 必须是私有普通文件")
 	}
 	file, err := os.Open(journalPath)

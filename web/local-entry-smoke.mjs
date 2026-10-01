@@ -27,6 +27,7 @@ const binary = join(root, "bin/gatt");
 const build = JSON.parse(readFileSync(join(root, "bin/build-evidence.json")));
 let server;
 let browser;
+let zoomContext;
 const errors = [];
 const results = {};
 let syntheticCalls=0;
@@ -126,6 +127,34 @@ try {
     await expect(page.getByRole("heading",{name,level:2,exact:true})).toBeVisible();
   }
   results.source_edit_version_ui=true;
+  const sourceCardForCAS=page.locator("article.source-card").filter({has:page.getByRole("heading",{name:"Isolated source",level:2,exact:true})});
+  await sourceCardForCAS.getByRole("button",{name:"编辑",exact:true}).click();
+  await sourceDialog.getByLabel("来源名称",{exact:true}).fill("Local source draft");
+  let currentSourceForCAS=(await api(`sources/${source.body.id}`,"GET",undefined,session)).body;
+  expect((await api(`sources/${source.body.id}`,"PATCH",{version:currentSourceForCAS.version,name:"External source edit"},session)).status).toBe(200);
+  await sourceDialog.getByRole("button",{name:"保存来源",exact:true}).click();
+  await expect(sourceDialog.getByRole("region",{name:"来源版本冲突",exact:true})).toContainText("External source edit");
+  await expect(sourceDialog.getByLabel("来源名称",{exact:true})).toHaveValue("Local source draft");
+  expect((await api(`sources/${source.body.id}`,"GET",undefined,session)).body.name).toBe("External source edit");
+  await sourceDialog.getByRole("button",{name:"使用当前版本，保留来源输入",exact:true}).click();
+  await sourceDialog.getByRole("button",{name:"保存来源",exact:true}).click();
+  await expect(sourceDialog).not.toBeVisible();
+  await page.locator("article.source-card").filter({has:page.getByRole("heading",{name:"Local source draft",level:2,exact:true})}).getByRole("button",{name:"编辑",exact:true}).click();
+  await sourceDialog.getByLabel("来源名称",{exact:true}).fill("Discard source draft");
+  currentSourceForCAS=(await api(`sources/${source.body.id}`,"GET",undefined,session)).body;
+  expect((await api(`sources/${source.body.id}`,"PATCH",{version:currentSourceForCAS.version,name:"Isolated source"},session)).status).toBe(200);
+  await sourceDialog.getByRole("button",{name:"保存来源",exact:true}).click();
+  await expect(sourceDialog.getByRole("region",{name:"来源版本冲突",exact:true})).toContainText("Isolated source");
+  await sourceDialog.getByRole("button",{name:"放弃来源修改",exact:true}).click();
+  await expect(sourceDialog.getByLabel("来源名称",{exact:true})).toHaveValue("Isolated source");
+  await sourceDialog.getByRole("button",{name:"关闭 ×",exact:true}).click();
+  // Refresh only public metadata; the external edit restored the fixture name.
+  await page.locator("nav").getByRole("button",{name:"设置"}).click();
+  await page.getByRole("button",{name:"刷新数据 ↻",exact:true}).click();
+  await expect(page.getByRole("button",{name:"刷新数据 ↻",exact:true})).toBeEnabled();
+  await page.locator("nav").getByRole("button",{name:"来源"}).click();
+  await expect(page.getByRole("heading",{name:"Isolated source",level:2,exact:true})).toBeVisible();
+  results.source_dirty_cas_explicit_resubmit_discard_ui=true;
   const key = await api("client-keys", "POST", { name: "Isolated client", source_id: source.body.id }, session);
   expect(key.status).toBe(201);
   results.setup_and_business_data = true;
@@ -265,6 +294,123 @@ try {
   const recorded=(await api(`requests/${requestID}`,"GET",undefined,session)).body.request;
   expect(recorded.status).toBe("succeeded");expect(recorded.usage.input_tokens).toBe(3);expect(recorded.usage.output_tokens).toBe(2);
   results.source_call_request_filter_detail_usage_ui=true;
+
+  await page.locator("nav").getByRole("button",{name:"设置"}).click();
+  const dirtyLimitsPanel=page.locator("section").filter({has:page.getByRole("heading",{name:"新请求的运行限制",exact:true})});
+  const concurrentInput=dirtyLimitsPanel.getByLabel("全局并发",{exact:true});
+  await concurrentInput.fill("4");
+  let externalSettings=(await api("settings","GET",undefined,session)).body;
+  expect((await api("settings","PATCH",{version:externalSettings.version,changes:{max_concurrent:5}},session)).status).toBe(200);
+  await page.getByRole("button",{name:"刷新数据 ↻",exact:true}).click();
+  await expect(page.getByRole("button",{name:"刷新数据 ↻",exact:true})).toBeEnabled();
+  await expect(concurrentInput).toHaveValue("4");
+  await dirtyLimitsPanel.getByRole("button",{name:"保存运行限制",exact:true}).click();
+  await expect(dirtyLimitsPanel.getByRole("region",{name:"运行限制版本冲突",exact:true})).toContainText("当前并发 5");
+  expect((await api("settings","GET",undefined,session)).body.limits.max_concurrent).toBe(5);
+  await dirtyLimitsPanel.getByRole("button",{name:"使用当前版本，保留运行限制输入",exact:true}).click();
+  await dirtyLimitsPanel.getByRole("button",{name:"保存运行限制",exact:true}).click();
+  await expect.poll(async()=>(await api("settings","GET",undefined,session)).body.limits.max_concurrent).toBe(4);
+  await concurrentInput.fill("7");externalSettings=(await api("settings","GET",undefined,session)).body;
+  expect((await api("settings","PATCH",{version:externalSettings.version,changes:{max_concurrent:6}},session)).status).toBe(200);
+  await dirtyLimitsPanel.getByRole("button",{name:"保存运行限制",exact:true}).click();
+  await expect(dirtyLimitsPanel.getByRole("region",{name:"运行限制版本冲突",exact:true})).toContainText("当前并发 6");
+  await dirtyLimitsPanel.getByRole("button",{name:"放弃运行限制修改",exact:true}).click();
+  await expect(concurrentInput).toHaveValue("6");
+  results.settings_limits_dirty_cas_explicit_resubmit_discard_ui=true;
+  const dirtyRuntimePanel=page.locator("section").filter({has:page.getByRole("heading",{name:"本机运行",exact:true})});
+  const retentionInput=dirtyRuntimePanel.getByLabel("请求与续接绑定保留天数",{exact:true});
+  await retentionInput.fill("8");externalSettings=(await api("settings","GET",undefined,session)).body;
+  expect((await api("settings","PATCH",{version:externalSettings.version,changes:{retention_days:9}},session)).status).toBe(200);
+  await page.getByRole("button",{name:"刷新数据 ↻",exact:true}).click();
+  await expect(page.getByRole("button",{name:"刷新数据 ↻",exact:true})).toBeEnabled();
+  await expect(retentionInput).toHaveValue("8");
+  await dirtyRuntimePanel.getByRole("button",{name:"保存",exact:true}).click();
+  await expect(dirtyRuntimePanel.getByRole("region",{name:"保留期版本冲突",exact:true})).toContainText("当前清理预览 9 天");
+  expect((await api("settings","GET",undefined,session)).body.retention_preview.days).toBe(9);
+  await dirtyRuntimePanel.getByRole("button",{name:"使用当前版本，保留保留期输入",exact:true}).click();
+  await dirtyRuntimePanel.getByRole("button",{name:"保存",exact:true}).click();
+  await expect.poll(async()=>(await api("settings","GET",undefined,session)).body.retention_preview.days).toBe(8);
+  results.settings_retention_dirty_cas_explicit_resubmit_ui=true;
+
+  await page.locator("nav").getByRole("button",{name:"工具"}).click();
+  const cachePanel=page.locator("section").filter({has:page.getByRole("heading",{name:"本机结果缓存",exact:true})});
+  const cacheTTL=cachePanel.getByLabel("有效期（1–60 分钟）",{exact:true});
+  await cacheTTL.fill("7");
+  let cacheState=(await api("response-cache","GET",undefined,session)).body.settings;
+  expect((await api("response-cache","PUT",{...cacheState,ttl_minutes:12,save_output_consent:false},session)).status).toBe(200);
+  await cachePanel.getByRole("button",{name:"刷新",exact:true}).click();
+  await expect(cachePanel.getByRole("button",{name:"刷新",exact:true})).toBeEnabled();
+  await expect(cacheTTL).toHaveValue("7");
+  await cachePanel.getByRole("button",{name:"保存设置",exact:true}).click();
+  await expect(cachePanel.getByRole("region",{name:"缓存版本冲突",exact:true})).toContainText("12");
+  expect((await api("response-cache","GET",undefined,session)).body.settings.ttl_minutes).toBe(12);
+  await cachePanel.getByRole("button",{name:"使用当前版本，保留缓存输入",exact:true}).click();
+  await cachePanel.getByRole("button",{name:"保存设置",exact:true}).click();
+  await expect.poll(async()=>(await api("response-cache","GET",undefined,session)).body.settings.ttl_minutes).toBe(7);
+  await cacheTTL.fill("9");cacheState=(await api("response-cache","GET",undefined,session)).body.settings;
+  expect((await api("response-cache","PUT",{...cacheState,ttl_minutes:13,save_output_consent:false},session)).status).toBe(200);
+  await cachePanel.getByRole("button",{name:"保存设置",exact:true}).click();
+  await expect(cachePanel.getByRole("region",{name:"缓存版本冲突",exact:true})).toBeVisible();
+  await cachePanel.getByRole("button",{name:"放弃缓存修改",exact:true}).click();
+  await expect(cacheTTL).toHaveValue("13");
+  results.cache_dirty_refresh_cas_explicit_resubmit_discard_ui=true;
+
+  const cacheValidation=route=>route.request().method()==="PUT"?route.fulfill({status:422,contentType:"application/json",body:JSON.stringify({error:{message:"TTL field fixture",field:"ttl_minutes"}})}):route.continue();
+  await page.route("**/admin/response-cache",cacheValidation);
+  try{await cachePanel.getByRole("button",{name:"保存设置",exact:true}).click();await expect(cacheTTL).toHaveAttribute("aria-describedby","cache-error");await expect(cachePanel.getByRole("alert")).toContainText("TTL field fixture");await expect(cachePanel.getByRole("button",{name:"保存设置",exact:true})).toBeFocused();await expect(cacheTTL).toHaveValue("13");}
+  finally{await page.unroute("**/admin/response-cache",cacheValidation);}
+  results.cache_field_error_focus_and_draft_ui=true;
+
+  await page.locator("nav").getByRole("button",{name:"运维",exact:true}).click();
+  const notifyPanel=page.locator("section").filter({has:page.getByRole("heading",{name:"提醒与通知",exact:true})});
+  const notifyAuth=notifyPanel.getByRole("checkbox",{name:"账号认证",exact:true});
+  await expect(notifyAuth).toBeChecked();await notifyAuth.uncheck();
+  const notifySecret=notifyPanel.getByLabel("签名凭据",{exact:true});await notifySecret.fill("SYNTHETIC_NOTIFY_DRAFT");
+  let notifyState=(await api("notifications","GET",undefined,session)).body.settings;
+  expect((await api("notifications","PUT",{version:notifyState.version,enabled:false,url:"",signature:false,event_kinds:["auth","quota"]},session)).status).toBe(200);
+  await notifyPanel.getByRole("button",{name:"刷新通知设置",exact:true}).click();
+  await expect(notifyPanel.getByRole("button",{name:"刷新通知设置",exact:true})).toBeEnabled();
+  await expect(notifyAuth).not.toBeChecked();await expect(notifySecret).toHaveValue("SYNTHETIC_NOTIFY_DRAFT");
+  await notifyPanel.getByRole("button",{name:"保存通知设置",exact:true}).click();
+  const notifyConflict=notifyPanel.getByRole("region",{name:"通知版本冲突",exact:true});
+  await expect(notifyConflict).toBeVisible();await expect(notifyConflict).not.toContainText("SYNTHETIC_NOTIFY_DRAFT");
+  expect((await api("notifications","GET",undefined,session)).body.settings.event_kinds).toEqual(["auth","quota"]);
+  await notifyPanel.getByRole("button",{name:"使用当前版本，保留通知输入",exact:true}).click();
+  await expect(notifySecret).toHaveValue("SYNTHETIC_NOTIFY_DRAFT");
+  await notifyPanel.getByRole("button",{name:"保存通知设置",exact:true}).click();
+  await expect.poll(async()=>(await api("notifications","GET",undefined,session)).body.settings.event_kinds.includes("auth")).toBe(false);
+  await expect(notifySecret).toHaveValue("");
+  await notifyPanel.getByRole("checkbox",{name:"已观测额度",exact:true}).uncheck();await notifySecret.fill("SYNTHETIC_NOTIFY_DISCARD");
+  notifyState=(await api("notifications","GET",undefined,session)).body.settings;
+  expect((await api("notifications","PUT",{version:notifyState.version,enabled:false,url:"",signature:false,event_kinds:["auth"]},session)).status).toBe(200);
+  await notifyPanel.getByRole("button",{name:"保存通知设置",exact:true}).click();await expect(notifyConflict).toBeVisible();
+  await notifyPanel.getByRole("button",{name:"放弃通知修改",exact:true}).click();
+  await expect(notifyAuth).toBeChecked();await expect(notifySecret).toHaveValue("");
+  results.notifications_dirty_cas_explicit_resubmit_discard_ui=true;
+
+  const notificationURL=notifyPanel.getByLabel("HTTPS webhook URL",{exact:true});
+  await notificationURL.fill("http://127.0.0.1/hook");await notifyPanel.getByRole("button",{name:"保存通知设置",exact:true}).click();
+  await expect(notificationURL).toHaveAttribute("aria-describedby","notification-save-error");await expect(notifyPanel.getByRole("alert")).toContainText("HTTPS webhook URL");await expect(notifyPanel.getByRole("button",{name:"保存通知设置",exact:true})).toBeFocused();await expect(notificationURL).toHaveValue("http://127.0.0.1/hook");
+  await notificationURL.fill("");
+  results.notifications_field_error_focus_and_draft_ui=true;
+
+  let releaseNotificationA;const notificationGate=new Promise(resolve=>releaseNotificationA=resolve);let notificationACalls=0,notificationBCalls=0;
+  const notificationFixtures={items:[{id:"notification-ui-a",kind:"auth",summary:"Notification A",state:"active",version:1,count:1},{id:"notification-ui-b",kind:"quota",summary:"Notification B",state:"active",version:1,count:1}]};
+  const notificationList=route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(notificationFixtures)});
+  const notificationDismissA=async route=>{notificationACalls++;await notificationGate;await route.fulfill({status:200,contentType:"application/json",body:"{}"});};
+  const notificationDismissB=async route=>{notificationBCalls++;await route.fulfill({status:200,contentType:"application/json",body:"{}"});};
+  await page.route("**/admin/alerts",notificationList);await page.route("**/admin/alerts/notification-ui-a/dismiss",notificationDismissA);await page.route("**/admin/alerts/notification-ui-b/dismiss",notificationDismissB);
+  try{
+    await notifyPanel.getByRole("button",{name:"刷新提醒与投递记录",exact:true}).click();
+    const dismissA=notifyPanel.locator(".tool-row").filter({hasText:"Notification A"}).getByRole("button",{name:"标为已读",exact:true});
+    const dismissB=notifyPanel.locator(".tool-row").filter({hasText:"Notification B"}).getByRole("button",{name:"标为已读",exact:true});
+    await dismissA.evaluate(button=>{button.click();button.click();});
+    await expect.poll(()=>notificationACalls).toBe(1);await expect(dismissA).toBeDisabled();await expect(dismissB).toBeEnabled();
+    await expect(notifyPanel.getByRole("button",{name:"保存通知设置",exact:true})).toBeEnabled();
+    await dismissB.click();await expect.poll(()=>notificationBCalls).toBe(1);await expect(dismissB).toBeEnabled();
+    releaseNotificationA();await expect(dismissA).toBeEnabled();expect(notificationACalls).toBe(1);
+    results.notifications_independent_alert_duplicate_guard_ui=true;
+  }finally{releaseNotificationA();await page.unroute("**/admin/alerts",notificationList);await page.unroute("**/admin/alerts/notification-ui-a/dismiss",notificationDismissA);await page.unroute("**/admin/alerts/notification-ui-b/dismiss",notificationDismissB);}
 
   await page.locator("nav").getByRole("button",{name:"设置"}).click();
   const limitsPanel=page.locator("section").filter({has:page.getByRole("heading",{name:"新请求的运行限制",exact:true})});
@@ -775,6 +921,51 @@ try {
   results.responsive_direct_entry = true;
   results.semantic_control_labels_10_pages_ui = true;
 
+  // Actual Tab/Enter navigation and focus traversal; no mouse activation.
+  for(const section of ["来源","模型","API Keys","路由","工具","请求","用量","预算","运维","设置"]){
+    await fresh.reload();await expect(fresh.locator("nav")).toBeVisible();
+    let selected=false;
+    for(let i=0;i<30;i++){
+      await fresh.keyboard.press("Tab");
+      if(await fresh.evaluate(name=>document.activeElement?.closest("nav")&&document.activeElement.textContent.includes(name),section)){selected=true;break;}
+    }
+    expect(selected,`${section} navigation reachable by Tab`).toBe(true);await fresh.keyboard.press("Enter");
+    await fresh.waitForLoadState("networkidle");
+    const required=await fresh.evaluate(()=>{
+      window.__coveFocusIDs=new WeakMap();
+      const elements=[...document.querySelectorAll('main button,main input:not([type="hidden"]),main select,main textarea,main a[href],main summary,main [tabindex]')].filter(el=>!el.matches(':disabled')&&el.tabIndex>=0&&el.checkVisibility({visibilityProperty:true})&&el.getClientRects().length&&el.getBoundingClientRect().width>0);
+      elements.forEach((el,i)=>window.__coveFocusIDs.set(el,i));return elements.length;
+    });
+    const reached=new Set();
+    for(let i=0;i<required*3+30&&reached.size<required;i++){
+      await fresh.keyboard.press("Tab");
+      const focused=await fresh.evaluate(()=>{
+        const el=document.activeElement,id=window.__coveFocusIDs.get(el);if(id===undefined)return null;
+        const r=el.getBoundingClientRect();return {id,visible:r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth};
+      });
+      if(focused){expect(focused.visible,`${section} focused control is visible`).toBe(true);reached.add(focused.id);}
+    }
+    expect(reached.size,`${section} all visible enabled controls reachable by Tab`).toBe(required);
+  }
+  results.keyboard_navigation_and_visible_controls_10_pages_ui=true;
+  const zoomProfile=join(temp,"zoom-profile");mkdirSync(join(zoomProfile,"Default"),{recursive:true});
+  // ChromeZoomLevelPrefs: default storage-partition key x; 1.2 ** level.
+  // This sets browser zoom, not CSS zoom or pinch/page-scale emulation.
+  writeFileSync(join(zoomProfile,"Default","Preferences"),JSON.stringify({partition:{per_host_zoom_levels:{x:{"127.0.0.1":{zoom_level:Math.log(2)/Math.log(1.2),last_modified:"13400000000000000"}}}}}));
+  zoomContext=await chromium.launchPersistentContext(zoomProfile,{headless:true,channel:"chrome",viewport:null,args:["--window-size=1280,900"]});
+  const zoomPage=zoomContext.pages()[0];await zoomPage.goto(base);
+  await expect(zoomPage.locator("nav")).toBeVisible();
+  const zoomMetrics=await zoomPage.evaluate(()=>({width:innerWidth,pixelRatio:devicePixelRatio,scale:visualViewport.scale}));
+  expect(zoomMetrics).toEqual({width:640,pixelRatio:2,scale:1});
+  for(const section of ["来源","模型","API Keys","路由","工具","请求","用量","预算","运维","设置"]){
+    await zoomPage.locator("nav").getByRole("button",{name:section}).click();await zoomPage.waitForLoadState("networkidle");
+    await expect.poll(()=>zoomPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),{message:`${section} overflows at actual 200 percent browser zoom`}).toBe(false);
+    await expect(zoomPage.locator("nav").getByRole("button",{name:"API Keys"})).toBeVisible();
+  }
+  await zoomPage.screenshot({path:join(root,"test-results/local-entry-200-percent.png"),fullPage:true});
+  results.actual_chrome_200_percent_zoom_10_pages_ui=true;results.browser_zoom_metrics=zoomMetrics;
+  await zoomContext.close();zoomContext=null;
+
   const unavailable = await browser.newContext();
   await unavailable.addInitScript(() => { Storage.prototype.getItem = () => { throw new Error("storage blocked"); }; });
   const blocked = await unavailable.newPage();
@@ -802,6 +993,7 @@ try {
   console.error(JSON.stringify(diagnostic));
   throw error;
 } finally {
+  await zoomContext?.close();
   await browser?.close();
   await stop();
   await new Promise(resolve=>upstream.close(resolve));
