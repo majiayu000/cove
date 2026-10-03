@@ -9,6 +9,8 @@
   "idle_timeout_seconds": 120,
   "total_timeout_seconds": 1800,
   "retention_days": 7,
+  "allow_paid_fallback": true,
+  "subscription_quota_threshold": 5,
   "codex": {
     "base_url": "https://chatgpt.com/backend-api/codex",
     "auth_base_url": "https://auth.openai.com",

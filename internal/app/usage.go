@@ -299,7 +299,9 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	var ttft sql.NullFloat64
 	var ttftKnown int64
-	err = a.Store.DB.QueryRow(`SELECT avg((julianday(json_extract(data,'$.first_event_at'))-julianday(started))*86400000),count(json_extract(data,'$.first_event_at')) FROM requests WHERE `+where, args...).Scan(&ttft, &ttftKnown)
+	// Request-level TTFT includes queueing and retries, and ends at semantic
+	// content. Metadata/keepalive-only requests have no sample.
+	err = a.Store.DB.QueryRow(`SELECT avg((julianday(json_extract(data,'$.first_content_at'))-julianday(started))*86400000),count(json_extract(data,'$.first_content_at')) FROM requests WHERE `+where, args...).Scan(&ttft, &ttftKnown)
 	if err != nil {
 		accountingFailure(w, err)
 		return

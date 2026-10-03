@@ -37,6 +37,7 @@ type clientCard struct {
 	Scopes           []string            `json:"scopes"`
 	RecommendedPaths map[string][]string `json:"recommended_paths"`
 	Evidence         string              `json:"evidence"`
+	Configuration    clientConfiguration `json:"configuration"`
 }
 
 func clientCards() []clientCard {
@@ -117,6 +118,7 @@ type clientField struct {
 }
 type clientPrivateChange struct {
 	Kind           string            `json:"kind"`
+	Model          string            `json:"model"`
 	Scope          string            `json:"scope"`
 	Root           string            `json:"authorized_root"`
 	Path           string            `json:"path"`
@@ -168,6 +170,85 @@ type clientChange struct {
 	Files          []map[string]any `json:"files"`
 }
 
+// Summarize only the latest configuration target explicitly selected through Cove.
+// This is a file check, not a claim about the client's effective runtime config.
+type clientConfiguration struct {
+	State     string    `json:"state"`
+	Model     string    `json:"model,omitempty"`
+	Path      string    `json:"path,omitempty"`
+	Scope     string    `json:"scope,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+	Reason    string    `json:"reason"`
+}
+
+func (a *App) clientConfiguration(kind, origin string) (clientConfiguration, error) {
+	out := clientConfiguration{State: "not_configured", CheckedAt: time.Now().UTC(), Reason: "尚无 Cove 配置记录；未读取其他客户端文件"}
+	var raw, ref string
+	err := a.Store.DB.QueryRow("SELECT data,secret_ref FROM client_changes WHERE json_extract(data,'$.kind')=? ORDER BY rowid DESC LIMIT 1", kind).Scan(&raw, &ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	var change clientChange
+	if err = json.Unmarshal([]byte(raw), &change); err != nil {
+		return out, err
+	}
+	out.State, out.Path, out.Scope = change.State, change.Path, change.Scope
+	if change.State != "applied" {
+		out.Reason = "最近所选配置的变更状态：" + change.State
+		return out, nil
+	}
+	var private clientPrivateChange
+	value, err := a.Secrets.Get(ref)
+	if err != nil || json.Unmarshal([]byte(value), &private) != nil {
+		out.State = "unavailable"
+		out.Reason = "配置的私有记录不可读；未检查目标文件"
+		return out, nil
+	}
+	if private.Model == "" {
+		out.State = "unverified"
+		out.Reason = "记录缺少模型信息，请重新预览所选配置"
+		return out, nil
+	}
+	target, err := openClientTarget(private.Kind, private.Scope, private.Root, private.Path, false)
+	if err != nil {
+		out.State = "unavailable"
+		out.Reason = "所选配置路径不可安全读取"
+		return out, nil
+	}
+	defer target.close()
+	content, exists, err := target.read()
+	if err != nil {
+		out.State = "unavailable"
+		out.Reason = "所选配置文件不可读"
+		return out, nil
+	}
+	if !exists {
+		out.State = "modified"
+		out.Reason = "所选配置文件已移除"
+		return out, nil
+	}
+	doc, err := parseClientDocument(private.Kind, private.Path, content, true)
+	if err != nil {
+		out.State = "modified"
+		out.Reason = "所选配置格式已改变，未读取其他文件"
+		return out, nil
+	}
+	for _, field := range clientDesiredFields(private.Kind, private.Model, origin) {
+		current, present, err := doc.field(field.Path)
+		if err != nil || !present || current != field.Ours {
+			out.State = "modified"
+			out.Reason = "所选配置的 Cove 字段已改变，请打开配置预览核对"
+			return out, nil
+		}
+	}
+	out.State, out.Model = "configured", private.Model
+	out.Reason = "最近所选配置的字段匹配；客户端运行、Key 环境及其他覆盖来源未验证"
+	return out, nil
+}
+
 func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) == 2 {
@@ -178,6 +259,23 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		cards := clientCards()
 		for i := range cards {
 			cards[i] = detectClient(r.Context(), cards[i])
+		}
+		a.mu.Lock()
+		origin := "http://" + a.Config.Listen
+		a.mu.Unlock()
+		a.clientMu.Lock()
+		defer a.clientMu.Unlock()
+		if a.storageFailed.Load() {
+			fail(w, 503, storageError().Error(), "")
+			return
+		}
+		for i := range cards {
+			configuration, err := a.clientConfiguration(cards[i].Kind, origin)
+			if err != nil {
+				fail(w, 503, "客户端配置状态不可读", "")
+				return
+			}
+			cards[i].Configuration = configuration
 		}
 		writeJSON(w, 200, map[string]any{"items": cards, "next_cursor": nil})
 		return
@@ -247,7 +345,7 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := clientDesiredFields(card.Kind, in.Model, "http://"+a.Config.Listen)
-	private := clientPrivateChange{Kind: card.Kind, Scope: in.Scope, Root: in.Root, Path: in.Path, Version: card.Version, BeforeHash: clientHash(before, existed), Existed: existed}
+	private := clientPrivateChange{Kind: card.Kind, Model: in.Model, Scope: in.Scope, Root: in.Root, Path: in.Path, Version: card.Version, BeforeHash: clientHash(before, existed), Existed: existed}
 	doc, err := parseClientDocument(card.Kind, in.Path, before, existed)
 	if err != nil {
 		fail(w, 422, "unsupported_format：配置格式不能无损编辑，原文件保留", "explicit_path")

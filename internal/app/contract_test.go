@@ -29,7 +29,7 @@ func contractApp(t *testing.T, upstream contractTransport) *App {
 		t.Fatal(err)
 	}
 	v := &memorySecrets{values: map[string]string{"administrator": "test-administrator", "source": "test-source-secret"}}
-	c := Config{Listen: "127.0.0.1:5569", MaxBody: 8192, MaxResponse: 16384, MaxEvent: 1024, MaxConcurrent: 1, HeaderTimeout: 2, IdleTimeout: 1, TotalTimeout: 5, RetentionDays: 7, Codex: CodexConfig{AuthBaseURL: "http://upstream.invalid", ClientID: "synthetic-client"}}
+	c := Config{Listen: "127.0.0.1:5569", MaxBody: 8192, MaxResponse: 16384, MaxEvent: 1024, MaxConcurrent: 1, HeaderTimeout: 2, IdleTimeout: 1, TotalTimeout: 5, RetentionDays: 7, AllowPaidFallback: true, SubscriptionQuotaThreshold: 5, Codex: CodexConfig{AuthBaseURL: "http://upstream.invalid", ClientID: "synthetic-client"}}
 	a, err := New(c, s, v, nil)
 	if err != nil {
 		t.Fatal(err)

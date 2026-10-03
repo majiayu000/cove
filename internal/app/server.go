@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -343,10 +344,13 @@ func (a *App) adminDispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/admin/status" && r.Method == "GET" {
 		a.mu.Lock()
-		out := map[string]any{"version": Version, "build_id": BuildID, "listen": a.Config.Listen, "data_dir": a.Config.DataDir, "storage_healthy": !a.storageFailed.Load(), "maintenance_error": a.maintenanceError, "active_requests": len(a.running), "queued_requests": len(a.queued), "queue": a.queueView(), "subscription_status": "experimental_unverified", "codex_client_version": a.Config.Codex.ClientVersion}
+		secretsHealthy := a.Secrets.Health() == nil
+		out := map[string]any{"version": Version, "build_id": BuildID, "listen": a.Config.Listen, "data_dir": a.Config.DataDir, "storage_healthy": !a.storageFailed.Load(), "maintenance_error": a.maintenanceError, "active_requests": len(a.running), "queued_requests": len(a.queued), "queue": a.queueView(), "account_active": maps.Clone(a.accountActive), "route_active": maps.Clone(a.routeActive), "secrets_healthy": secretsHealthy, "accepting_requests": !a.stopping && !a.stagedAdmission && !a.backupQuiescing && !a.storageFailed.Load() && secretsHealthy, "subscription_status": "experimental_unverified", "codex_client_version": a.Config.Codex.ClientVersion}
 		a.mu.Unlock()
 		for k, v := range a.operationsStatus() {
-			out[k] = v
+			if _, exists := out[k]; !exists {
+				out[k] = v
+			}
 		}
 		writeJSON(w, 200, out)
 		return

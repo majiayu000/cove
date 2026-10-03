@@ -30,7 +30,7 @@ for name, expected in evidence['artifact_sha256'].items():
     if sha(data) != expected: raise SystemExit('Artifact changed after build: '+name)
     contents[name] = data
 contents['bin/build-evidence.json'] = (root/'bin/build-evidence.json').read_bytes()
-for name in ['README.md','Cove.command','config.example.json','docs/platform-commands.md','docs/implementation.md','docs/implementation-readiness.tsv','docs/spec/README.md']:
+for name in ['README.md','Cove.command','config.example.json','docs/first-request.md','docs/platform-commands.md','docs/implementation.md','docs/implementation-readiness.tsv','docs/spec/README.md']:
     contents[name] = (root/name).read_bytes()
 license_status = 'unlicensed-development-artifact'
 if (root/'LICENSE').is_file():

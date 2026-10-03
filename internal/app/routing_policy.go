@@ -47,6 +47,8 @@ type RoutingPolicyCandidate struct {
 	ExcludedReason string // Existing enabled/auth/account-slot checks run first.
 }
 type RoutingPolicyInput struct {
+	SubscriptionFirst         bool // Global scheduling is applied by the production route caller.
+	AllowPaidFallback         bool
 	IncludeBusySources        bool
 	OwnedRequestID            string // Only a registered running request may reuse its own account slot.
 	SnapshotOut               *RoutingPolicySnapshot
@@ -497,6 +499,26 @@ func (s *PolicyState) latencySnapshot(c RoutingPolicyCandidate, operation string
 	}
 	return count, &ewma, &first, &last
 }
+func preferSubscriptions(candidates []RoutingPolicyCandidate, reasons []CandidateReason, allowPaid bool) []RoutingPolicyCandidate {
+	hasSubscription := slices.ContainsFunc(candidates, func(c RoutingPolicyCandidate) bool { return c.Source.Kind == "codex_subscription" })
+	return slices.DeleteFunc(candidates, func(c RoutingPolicyCandidate) bool {
+		if c.Source.Kind == "codex_subscription" || c.Source.Kind == "none" || allowPaid && !hasSubscription {
+			return false
+		}
+		for i := range reasons {
+			if reasons[i].ModelID == c.Model.ID {
+				reasons[i].Eligible = false
+				if !allowPaid {
+					reasons[i].Reason = "全局调度已关闭付费 API 回退"
+				} else {
+					reasons[i].Reason = "有可用订阅候选，付费 API 仅作为回退"
+				}
+			}
+		}
+		return true
+	})
+}
+
 func (s *PolicyState) Filter(policy RoutePolicy, strategy string, in RoutingPolicyInput, candidates []RoutingPolicyCandidate, now time.Time) (RoutingPolicyResult, error) {
 	result := RoutingPolicyResult{Candidates: []RoutingPolicyCandidate{}, Reasons: []CandidateReason{}, Snapshot: RoutingPolicySnapshot{Algorithm: strategy, EvaluatedAt: now.UTC(), Candidates: []CandidatePolicySnapshot{}}}
 	if err := validateRoutePolicy(policy); err != nil {
@@ -508,7 +530,6 @@ func (s *PolicyState) Filter(policy RoutePolicy, strategy string, in RoutingPoli
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	anchor := policyModelAnchor(candidates)
-	priority := math.MaxInt
 	estimates := map[string]CandidatePolicySnapshot{}
 	for _, candidate := range candidates {
 		c := candidate
@@ -580,15 +601,22 @@ func (s *PolicyState) Filter(policy RoutePolicy, strategy string, in RoutingPoli
 			snapshot.LatencyCount, snapshot.LatencyEWMA, snapshot.LatencyFrom, snapshot.LatencyTo = s.latencySnapshot(c, in.Operation, now)
 			reason.Eligible = true
 			reason.Reason = "请求转换与准入检查通过；未知 provider 能力仍需真实验证"
-			if c.Member.Priority < priority {
-				priority = c.Member.Priority
-			}
 			result.Candidates = append(result.Candidates, c)
 		}
 		snapshot.Reason = reason.Reason
 		estimates[c.Model.ID] = snapshot
 		result.Reasons = append(result.Reasons, reason)
 		result.Snapshot.Candidates = append(result.Snapshot.Candidates, snapshot)
+	}
+	if in.SubscriptionFirst {
+		result.Candidates = preferSubscriptions(result.Candidates, result.Reasons, in.AllowPaidFallback)
+		for i := range result.Snapshot.Candidates {
+			result.Snapshot.Candidates[i].Reason = result.Reasons[i].Reason
+		}
+	}
+	priority := math.MaxInt
+	for _, c := range result.Candidates {
+		priority = min(priority, c.Member.Priority)
 	}
 	result.Candidates = slices.DeleteFunc(result.Candidates, func(c RoutingPolicyCandidate) bool { return c.Member.Priority != priority })
 	slices.SortFunc(result.Candidates, func(a, b RoutingPolicyCandidate) int { return strings.Compare(a.Model.ID, b.Model.ID) })

@@ -304,7 +304,7 @@ func (a *App) collectConfig(ctx context.Context) (configTransfer, error) {
 	// Actual portable limits are exported even before the first settings edit.
 	c := a.Config
 	out.Settings["runtime_settings"] = settingsChanges{MaxConcurrent: &c.MaxConcurrent, MaxBody: &c.MaxBody, MaxResponse: &c.MaxResponse,
-		MaxEvent: &c.MaxEvent, IdleTimeout: &c.IdleTimeout, TotalTimeout: &c.TotalTimeout, RetentionDays: &c.RetentionDays}
+		MaxEvent: &c.MaxEvent, IdleTimeout: &c.IdleTimeout, TotalTimeout: &c.TotalTimeout, RetentionDays: &c.RetentionDays, AllowPaidFallback: &c.AllowPaidFallback, SubscriptionQuotaThreshold: &c.SubscriptionQuotaThreshold}
 	return out, nil
 }
 func transferEntities(pack configTransfer) []transferEntity {
@@ -593,6 +593,11 @@ func validateTransferPackage(pack configTransfer, unknown []transferEntity) erro
 	return nil
 }
 func validatePortableSettings(v settingsChanges) error {
+	if v.SubscriptionQuotaThreshold != nil {
+		if err := validateSubscriptionQuotaThreshold(*v.SubscriptionQuotaThreshold); err != nil {
+			return err
+		}
+	}
 	if v.Listen != nil || v.DataDir != nil || v.HeaderTimeout != nil {
 		return errors.New("本机 listen/data_dir/header 设置不能由配置包替换")
 	}

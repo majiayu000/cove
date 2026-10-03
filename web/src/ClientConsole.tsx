@@ -9,10 +9,10 @@ type RestorePreview = { change_id: string; path: string; current_hash: string; s
 const statusLabel: Record<string, string> = { installed: "已安装，配置卡已核验", not_installed: "未安装", detection_failed: "版本检测失败", unsupported_version: "此版本配置合同未核验", applying: "应用未完成", applied: "文件已应用", restoring: "恢复未完成", restored: "已恢复", partial: "文件可能已改变，请预览恢复", failed: "写入失败" };
 function show(value: unknown) { return value === null || value === undefined ? "未设置" : String(value); }
 
-export function ClientConsole({ api }: { api: API }) {
+export function ClientConsole({ api, initialKind, initialModel, onChanged }: { api: API; initialKind?: string; initialModel?: string; onChanged?: () => Promise<void> }) {
   const [clients, setClients] = useState<ClientCard[]>([]), [changes, setChanges] = useState<Change[]>([]);
-  const [kind, setKind] = useState("codex"), [scope, setScope] = useState("user");
-  const [root, setRoot] = useState(""), [path, setPath] = useState(""), [model, setModel] = useState(""), [overrides, setOverrides] = useState("");
+  const [kind, setKind] = useState(initialKind || "codex"), [scope, setScope] = useState(initialKind && initialKind !== "codex" ? "project" : "user");
+  const [root, setRoot] = useState(""), [path, setPath] = useState(""), [model, setModel] = useState(initialModel || ""), [overrides, setOverrides] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null), [restore, setRestore] = useState<RestorePreview | null>(null), [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Set<string>>(() => new Set()), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const revision = useRef(0), restoreRevision = useRef(0), loadRevision = useRef(0), mounted = useRef(true), running = useRef(new Set<string>());
@@ -56,6 +56,7 @@ export function ClientConsole({ api }: { api: API }) {
     const result = await api<Change>("client-changes", "POST", { preview_id: preview.preview_id, base_hashes: Object.fromEntries(preview.files.map((file) => [file.path, file.base_hash])), secret_delivery: "env_reference" });
     if (current(selection)) { setNotice(`配置文件已应用（${result.id}）。请向客户端进程注入 ${preview.required_secret.env_name} 后自行启动；连接和工具尚未测试。`); setPreview(null); }
     await load();
+    await onChanged?.();
   }
   async function previewRestore(change: Change, selection: number) {
     const result = await api<RestorePreview>(`client-changes/${change.id}/restore-preview`, "POST", {});
@@ -66,6 +67,7 @@ export function ClientConsole({ api }: { api: API }) {
     await api(`client-changes/${restore.change_id}/restore`, "POST", { current_hash: restore.current_hash, resolutions });
     if (current(selection, true)) { setNotice("选定字段已恢复，所选保留的用户修改继续保留。没有发送模型测试。"); setRestore(null); }
     await load();
+    await onChanged?.();
   }
   const restoreConflicts = restore?.fields.filter((field) => field.action === "conflict") || [];
   return <>

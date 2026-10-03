@@ -23,7 +23,7 @@ def sources():
         '.gitignore', 'Cove.command', 'Makefile', 'README.md',
         'config.example.json', 'go.mod', 'go.sum',
     )]
-    for name in ('cmd', 'internal', 'web', 'scripts', 'docs'):
+    for name in ('.github', 'cmd', 'internal', 'web', 'scripts', 'docs'):
         for base, dirs, files in os.walk(ROOT / name):
             dirs[:] = sorted(d for d in dirs if d not in ('node_modules', 'dist', '__pycache__', '.git'))
             paths.extend(Path(base) / f for f in files if not f.startswith('.'))

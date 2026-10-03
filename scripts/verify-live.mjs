@@ -118,9 +118,15 @@ try {
   browser = await chromium.launch({ headless: true, channel: "chrome" });
   const context = await browser.newContext();
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    localStorage.setItem("cove.ui.mode", "dark");
+    localStorage.setItem("cove.ui.lang", "zh");
+    localStorage.setItem("cove.ui.page", "概览");
+  });
   await page.goto(base);
-  await page.locator("nav").getByRole("button", { name: "API Keys" }).click();
-  const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "创建 API Key", exact: true }) });
+  await page.locator("nav").getByRole("button", { name: "Keys", exact: true }).click();
+  await page.getByRole("button", { name: "add 创建 Key", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "API Keys管理", exact: true });
   const name = "真实验收 · " + Date.now();
   await panel.locator('input[name="name"]').fill(name);
   await panel.locator('select[name="target"]').selectOption("source:" + source.id);
@@ -133,7 +139,7 @@ try {
   report.browser_key_creation = true;
   await panel.getByRole("button", { name: "已保存，隐藏", exact: true }).click();
   await page.reload();
-  await page.locator("nav").getByRole("button", { name: "API Keys" }).click();
+  await page.locator("nav").getByRole("button", { name: "Keys", exact: true }).click();
   await expect(page.locator(".secret")).toHaveCount(0);
   report.once_secret_absent_after_refresh = true;
   await browser.close(); browser = undefined;

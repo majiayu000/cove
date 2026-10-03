@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import "./v13.css";
+import { V13Console } from "./V13Console";
 import { ConsoleModules } from "./ConsoleModules";
 import { ExtendedProtocolSettings } from "./ExtendedProtocolSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { ResourceConsole } from "./ResourceConsole";
 import { OperationsConsole } from "./OperationsConsole";
+import { mergeRequestPages } from "./v13-state";
 import { ClientConsole } from "./ClientConsole";
 import { AccountConsole } from "./AccountConsole";
 import { CloudProviderSettings } from "./CloudProviderSettings";
@@ -168,6 +171,7 @@ const format = (v: number | null | undefined) =>
   v == null ? "未知" : v.toLocaleString();
 function App() {
   const refreshSequence=useRef(0);
+  const refreshInFlight=useRef(0);
   const runningActions=useRef(new Set<string>());
   const [pendingActions,setPendingActions]=useState<string[]>([]);
   const [routes,setRoutes]=useState<any[]>([]);
@@ -175,7 +179,7 @@ function App() {
   const [aliases,setAliases]=useState<any[]>([]);
   const [logged, setLogged] = useState(false),
     [ready, setReady] = useState(false),
-    [page, setPage] = useState("来源"),
+    [page, setPage] = useState(() => {try{return localStorage.getItem("cove.ui.page") || "概览"}catch{return "概览"}}),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
@@ -228,7 +232,17 @@ function App() {
       models: "",
       credential: "",
     });
+  const [management, setManagement] = useState<{page:string;id?:string}|null>(null);
+  const managementDialog = useRef<HTMLDialogElement>(null);
   const sourceDialog=useRef<HTMLDialogElement>(null);
+  useEffect(() => {try{localStorage.setItem("cove.ui.page",page)}catch{/* Navigation remains available for this session. */}},[page]);
+  useEffect(() => {
+    const dialog = managementDialog.current;
+    if (!dialog) return;
+    if (management && !dialog.open) dialog.showModal();
+    else if (!management && dialog.open) dialog.close();
+  }, [management]);
+  useEffect(() => { if (detail) setManagement(null); }, [detail]);
   const [sourceConflict,setSourceConflict]=useState<Source|null>(null),[sourceConflictReadError,setSourceConflictReadError]=useState("");
   useEffect(()=>{
     const dialog=sourceDialog.current;
@@ -243,6 +257,8 @@ function App() {
     return "requests?" + query;
   }
   async function refresh() {
+    refreshInFlight.current++;
+    try {
     const sequence=++refreshSequence.current;
     const paths=["sources","client-keys",requestPath(),"status","usage","settings","routes","model-aliases"];
     const results=await Promise.allSettled(paths.map(path=>api(path)));
@@ -250,6 +266,9 @@ function App() {
     const setters=[setSources,setKeys,(v:any)=>{setRequests(v.items);setCursor(v.next_cursor)},setStatus,setUsage,setSettings,(v:any)=>setRoutes(v.items),(v:any)=>setAliases(v.items)];
     const errors:string[]=[];
     results.forEach((result,index)=>{if(result.status==="fulfilled")setters[index](result.value);else errors.push(paths[index].split("?")[0]+"："+result.reason.message)});
+    if(results[0].status==="rejected")setStatus((old:any)=>({...old,sources_stale:true}));
+    if(results[3].status==="rejected")setStatus((old:any)=>({...old,runtime_stale:true}));
+    if(results[6].status==="rejected")setRoutes(old=>old.map(route=>({...route,runtime:undefined})));
     if(errors.length)setError(errors.join("；"));
     const sourceResult=results[0];
     if(sourceResult.status==="fulfilled"){
@@ -258,6 +277,19 @@ function App() {
       if(sequence!==refreshSequence.current)return;
       const next:Record<string,Login>={};operations.forEach((result,index)=>{if(result.status==="fulfilled")next[result.value[0]]=result.value[1];else next[subs[index].id]={status:"unknown",message:result.reason.message}});setLogin(next);
     }
+  }
+    finally {refreshInFlight.current--;}
+  }
+  async function loadMoreRequests() {
+    if (!cursor) return;
+    const selection=refreshSequence.current;
+    const path=requestPath(cursor);
+    await run(async()=>{
+      const next=await api(path);
+      if(selection!==refreshSequence.current)return;
+      setRequests(old=>mergeRequestPages(old,next.items));
+      setCursor(next.next_cursor);
+    },"request-pagination");
   }
   async function run(fn: () => Promise<void>, actionID?: string) {
     const id=actionID ?? "global";
@@ -294,6 +326,28 @@ function App() {
     if (logged) run(refresh);
   }, [logged, filter, requestQuery]);
   useEffect(() => {
+    if(!logged || !["概览","来源","路由","请求"].includes(page))return;
+    let cancelled=false,inFlight=false;
+    const timer=window.setInterval(async()=>{
+      if(cancelled || document.hidden || inFlight || refreshInFlight.current || runningActions.current.size)return;
+      inFlight=true;
+      const selection=refreshSequence.current;
+      try {
+        const results=await Promise.allSettled([api("status"),api("routes"),api("sources")]);
+        if(cancelled || selection!==refreshSequence.current || refreshInFlight.current)return;
+        if(results[0].status==="fulfilled")setStatus(results[0].value);
+        else setStatus((old:any)=>({...old,runtime_stale:true}));
+        if(results[1].status==="fulfilled")setRoutes(results[1].value.items);
+        else setRoutes(old=>old.map(route=>({...route,runtime:undefined})));
+        if(results[2].status==="fulfilled")setSources(results[2].value);
+        else setStatus((old:any)=>({...old,sources_stale:true}));
+        const errors=results.filter((r):r is PromiseRejectedResult=>r.status==="rejected");
+        if(errors.length)setError(errors.map(r=>r.reason.message).join("；"));
+      } finally {inFlight=false;}
+    },5000);
+    return ()=>{cancelled=true;window.clearInterval(timer);};
+  },[logged,page]);
+  useEffect(() => {
     const pending = Object.entries(login).filter(
       ([, v]) => ["pending", "exchanging", "awaiting_confirmation"].includes(v.status),
     );
@@ -319,31 +373,8 @@ function App() {
         <button onClick={() => window.location.reload()}>重新连接</button>
       </main>
     );
-  const nav = ["来源", "模型", "API Keys", "路由", "工具", "请求", "用量", "预算", "运维", "设置"];
-  const titles: Record<string, string> = {
-    来源: "你的模型，泊在一处。",
-    模型: "发现模型，逐项验证。",
-    路由: "每次选择，都说得清。",
-    工具: "预览修改，随时恢复。",
-    预算: "预留、已知费用与未知分别可见。",
-    运维: "备份、诊断和配置搬运。",
-    "API Keys": "创建和管理 API Key",
-    请求: "每一次调用，都有迹可循。",
-    用量: "看清已知，也保留未知。",
-    设置: "始终在你的掌控之中。",
-  };
-  const descriptions: Record<string, string> = {
-    来源: "管理调用来源。登录、调用健康与额度分别展示。",
-    模型: "来源目录、手工模型和逐模型价格。",
-    路由: "显式模型映射、优先级与平滑加权轮询。",
-    工具: "选择配置路径，预览字段修改与恢复结果。",
-    预算: "本地软限制与人工核对；严格资格单独展示。",
-    运维: "每个操作保留结果与失败原因。",
-    "API Keys": "选择你的 Codex 订阅或 API 来源，创建供客户端调用的 API Key。",
-    请求: "只保存调用元数据，不保存提示词、输出或工具内容。",
-    用量: "统计包含管理端测试。订阅额度和 API 费用分开看。",
-    设置: "一个本机进程，一个数据库。凭据保存在 Cove 私有目录。",
-  };
+  const operationPage = management?.page || page;
+  const detailSelection = detailRevision.current;
   async function saveSource() {
     let accountId=form.account_id;
     if(!editing && !accountId) {
@@ -386,7 +417,8 @@ function App() {
       credential: "",
     });
     await refresh();
-    setNotice("来源已保存，完成测试后才会显示已验证。");
+    if (form.kind === "codex_subscription") setPage("来源");
+    setNotice(form.kind === "codex_subscription" ? "来源已添加。点击「登录 ChatGPT」完成账号授权，再到模型页读取可用模型。" : "来源已保存，完成测试后才会显示已验证。");
   }
   function edit(s: Source) {
     setSourceConflict(null);setSourceConflictReadError("");
@@ -402,6 +434,26 @@ function App() {
       credential: "",
     });
     setShowAdd(true);
+  }
+  function loginSource(s: Source) {
+    const popup = window.open("about:blank", "_blank");
+    if (popup) {
+      popup.sessionStorage.removeItem(sessionKey);
+      popup.opener = null;
+    }
+    void run(async () => {
+      try {
+        const operation = await api<Login>(`sources/${s.id}/login`, "POST", { version: s.version });
+        setLogin(old => ({ ...old, [s.id]: operation }));
+        if (operation.authorization_url) {
+          if (popup) popup.location.href = operation.authorization_url;
+          else setNotice("浏览器拦截了新窗口，请点击「继续授权」。");
+        } else popup?.close();
+      } catch (error) {
+        popup?.close();
+        throw error;
+      }
+    }, s.id);
   }
   const currentGuideKey = keys.find((k) => k.id === guideKey?.id);
   const routeGuide=!!currentGuideKey?.route_id;
@@ -423,76 +475,38 @@ function App() {
   const launchCommand = `(\n  set -e\n  COVE_CLIENT_HOME="$(mktemp -d \"\${TMPDIR:-/tmp}/cove-codex.XXXXXX\")"\n  chmod 700 "$COVE_CLIENT_HOME"\n  cat > "$COVE_CLIENT_HOME/config.toml" <<'COVE_CONFIG'\n${template}\nCOVE_CONFIG\n  printf '粘贴 Cove 客户端 Key（输入不显示）: '\n  read -r -s PERSONAL_GATEWAY_KEY\n  printf '\\n'\n  export PERSONAL_GATEWAY_KEY\n  CODEX_HOME="$COVE_CLIENT_HOME" codex\n)`;
   return (
     <div className="shell">
-      <aside>
-        <a className="brand" href="#" aria-label="Cove 首页">
-          cove<span>栖港 · 个人 AI 网关</span>
-        </a>
-        <nav>
-          {nav.map((n, i) => (
-            <button
-              key={n}
-              className={page === n ? "active" : ""}
-              onClick={() => {
-                setPage(n);
-                setError("");setNotice("");
-                detailRevision.current++;setDetail(null);
-              }}
-            >
-              <span className="nav-icon">{["◈", "◇", "↗", "⇄", "≡", "▥", "⚙"][i]}</span>
-              {n}
-              {n === "来源" && <small>{sources.length}</small>}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <span className={"dot " + (!status.storage_healthy ? "bad" : "")} />
-          {status.storage_healthy ? "本机服务已连接" : "存储异常，暂停调用"}
-          <code>{status.listen}</code>
-
-        </div>
-      </aside>
-      <main className="workspace">
-        <header>
-          <span className="breadcrumb">
-            工作空间 <span>/</span> {page}
-          </span>
-          <span className="version">LOCAL · {status.version}</span>
-        </header>
-        <div className="page-heading">
-          <div>
-            <span className="eyebrow">
-              {
-                ["SOURCES", "CONNECTIONS", "ACTIVITY", "USAGE", "PREFERENCES"][
-                  nav.indexOf(page)
-                ]
-              }
-            </span>
-            <h1>{titles[page]}</h1>
-            <p>{descriptions[page]}</p>
-          </div>
-          <button
-            className={page === "来源" ? "" : "secondary"}
-            disabled={busy}
-            onClick={() =>
-              page === "来源"
-                ? (setEditing(null),setSourceConflict(null),setSourceConflictReadError(""),
-                  setForm({
-                    name: "",
-                    kind: "api_key",
-      native_protocol: "responses",
-      provider:"openai_compatible", account_id:"", proxy_url:null as string|null,cloud_config:{} as NonNullable<Source["cloud_config"]>,
-      allow_parameter_adjustment: false,
-                    base_url: "",
-                    models: "",
-                    credential: "",
-                  }),
-                  setShowAdd(true))
-                : run(refresh)
-            }
-          >
-            {page === "来源" ? "+ 添加来源" : "刷新数据 ↻"}
-          </button>
-        </div>
+      <V13Console api={api} page={page} sources={sources} keys={keys} requests={requests} routes={routes} aliases={aliases}
+        logins={login} onLogin={loginSource}
+        onCancelLogin={s=>run(async()=>{await api(`sources/${s.id}/login`, "DELETE");await refresh();},s.id)}
+        hasMoreRequests={!!cursor} onMoreRequests={loadMoreRequests}
+        status={status} settings={settings} usage={usage} detail={detail} filter={filter} busy={busy} pending={pendingActions}
+        onPage={next=>{setPage(next);setError("");setNotice("");detailRevision.current++;setDetail(null)}}
+        onManage={(next,id)=>{setFreshKey("");setManagement({page:next,id})}}
+        onAdd={preset=>{
+          const defaults:Partial<Record<string,{kind:string;provider:string;native_protocol:string;base_url:string}>> = {
+            codex:{kind:"codex_subscription",provider:"codex",native_protocol:"responses",base_url:""},
+            openai:{kind:"api_key",provider:"openai",native_protocol:"responses",base_url:"https://api.openai.com/v1"},
+            anthropic:{kind:"api_key",provider:"anthropic",native_protocol:"messages",base_url:"https://api.anthropic.com"},
+            deepseek:{kind:"api_key",provider:"openai_compatible",native_protocol:"chat_completions",base_url:"https://api.deepseek.com/v1"},
+            gemini:{kind:"api_key",provider:"gemini",native_protocol:"gemini",base_url:"https://generativelanguage.googleapis.com"},
+            ollama:{kind:"none",provider:"local",native_protocol:"chat_completions",base_url:"http://127.0.0.1:11434/v1"},
+          };
+          setEditing(null);setSourceConflict(null);setSourceConflictReadError("");setError("");
+          setForm({name:preset==="codex"?"ChatGPT 订阅":"",kind:"api_key",provider:"openai_compatible",native_protocol:"responses",account_id:"",proxy_url:null,cloud_config:{},allow_parameter_adjustment:false,base_url:"",models:"",credential:"",...(defaults[preset||""]||{})});
+          setShowAdd(true);
+        }} onEdit={edit}
+        onDetail={id=>void run(async()=>{const selected=++detailRevision.current;const result=await api(`requests/${id}`);if(selected===detailRevision.current)setDetail(result)})}
+        onCloseDetail={()=>{detailRevision.current++;setDetail(null)}}
+        onReconcile={async()=>{const result=await api(`requests/${detail.request.id}`);if(detailSelection===detailRevision.current)setDetail(result)}}
+        onFilter={next=>{if(next===filter)return;refreshSequence.current++;setCursor(null);setFilter(next)}} onRefresh={refresh} run={run} onError={setError}/>
+      {!management && !showAdd && <div className="global-feedback" aria-live="polite">
+        {error && <div className="error" role="alert">{error}</div>}
+        {notice && <div className="notice" role="status">{notice}</div>}
+        {status.maintenance_error && <div className="error" role="alert">{status.maintenance_error}</div>}
+      </div>}
+      <dialog ref={managementDialog} className="management-sheet" aria-label={`${operationPage}管理`} onCancel={()=>{setFreshKey("");setManagement(null)}}>
+      <div className="sheet-heading"><h2>{operationPage === "工具" ? "客户端配置" : operationPage === "API Keys" && !management?.id ? "创建 Key" : `${operationPage}管理`}</h2><button className="icon-button" aria-label="关闭管理" onClick={()=>{setFreshKey("");setManagement(null)}}><span data-i="">close</span></button></div>
+      {management && <div className="workspace" data-operation-page={operationPage} data-selection={management.id || "create"}>
         {error && (
           <div className="error" role="alert">
             {error}
@@ -506,9 +520,9 @@ function App() {
         {status.maintenance_error && (
           <div className="error">{status.maintenance_error}</div>
         )}
-        {page === "来源" && (
+        {operationPage === "来源" && (
           <>
-            <AccountConsole api={api} onChanged={refresh}/>
+            {!management?.id && <AccountConsole api={api} onChanged={refresh}/>}
             <div className="summary-strip">
               <div>
                 <strong>{sources.length}</strong>
@@ -538,7 +552,7 @@ function App() {
               </div>
             ) : (
               <div className="source-grid">
-                {sources.map((s) => {
+                {sources.filter(s=>!management?.id || management.id===s.id).map((s) => {
                   const sourceBusy=busy||pendingActions.includes(s.id);
                   const runSource=(fn:()=>Promise<void>)=>run(fn,s.id);
                   return (
@@ -680,37 +694,7 @@ function App() {
                         <button
                           className="secondary"
                           disabled={sourceBusy}
-                          onClick={() => {
-                            const popup = window.open(
-                              "about:blank",
-                              "_blank",
-                            );
-                            if (popup) {
-                              popup.sessionStorage.removeItem(sessionKey);
-                              popup.opener = null;
-                            }
-                            runSource(async () => {
-                              try {
-                                const v = await api<Login>(
-                                  `sources/${s.id}/login`,
-                                  "POST",
-                                  { version: s.version },
-                                );
-                                setLogin((old) => ({ ...old, [s.id]: v }));
-                                if (v.authorization_url) {
-                                  if (popup)
-                                    popup.location.href = v.authorization_url;
-                                  else
-                                    setNotice("浏览器拦截了新窗口，请点击卡片中的「重新打开授权页面」。");
-                                } else {
-                                  popup?.close();
-                                }
-                              } catch (e) {
-                                popup?.close();
-                                throw e;
-                              }
-                            });
-                          }}
+                          onClick={() => loginSource(s)}
                         >
                           使用 ChatGPT 登录
                         </button>
@@ -859,16 +843,16 @@ function App() {
             </div>
           </>
         )}
-        {(page === "模型" || page === "路由") && <ConsoleModules api={api} sources={sources} clientKeys={keys} page={page} onChanged={refresh} />}
-        {page === "工具" && <><ClientConsole api={api}/><ExtendedProtocolSettings api={api}/><ConfigExtensionsConsole api={api}/><NativeOperationCapabilities api={api} sources={sources} onChanged={refresh}/></>}
-        {page === "运维" && <><NotificationSettings api={api}/><ResourceConsole api={api}/><OperationsConsole api={api} status={status}/></>}
-        {page === "预算" && <BudgetConsole api={api} keys={keys}/>}
-        {page === "API Keys" && (
+        {(operationPage === "模型" || operationPage === "路由") && <ConsoleModules api={api} sources={sources} clientKeys={keys} page={operationPage} onChanged={refresh} />}
+        {operationPage === "工具" && <><ClientConsole api={api} onChanged={refresh} initialKind={management?.id?.split(":")[0]} initialModel={management?.id?.split(":").slice(1).join(":")}/><ExtendedProtocolSettings api={api}/><ConfigExtensionsConsole api={api}/><NativeOperationCapabilities api={api} sources={sources} onChanged={refresh}/></>}
+        {operationPage === "运维" && <><NotificationSettings api={api}/><ResourceConsole api={api}/><OperationsConsole api={api} status={status}/></>}
+        {operationPage === "预算" && <BudgetConsole api={api} keys={keys}/>}
+        {operationPage === "API Keys" && (
           <>
-            <section className="panel">
+            <section className="panel key-create">
               <h2>创建 API Key</h2>
-              <form
-                className="inline-form"
+              {!freshKey && <form
+                className="key-create-form"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const f = new FormData(e.currentTarget);
@@ -890,9 +874,9 @@ function App() {
                   placeholder="例如：Codex · 个人项目"
                 /></label>
                 <KeyPolicyFields sources={sources} routes={routes}/>
-                <KeyBudgetFields api={api}/>
+                <details><summary>预算设置</summary><KeyBudgetFields api={api}/></details>
                 <button disabled={busy || !sources.length && !routes.length}>创建 API Key</button>
-              </form>
+              </form>}
               {freshKey && (
                 <div className="secret">
                   <b>只显示这一次，请保存在你的客户端。</b>
@@ -914,14 +898,14 @@ function App() {
                 </div>
               )}
             </section>
-            <section className="panel">
+            <section className="panel key-list">
               <h2>
                 已创建的 API Key <small>{keys.length}</small>
               </h2>
               {!keys.length ? (
                 <p className="placeholder">还没有 API Key，请先选择来源并创建。</p>
               ) : (
-                keys.map((k) => {
+                keys.filter(k=>!management?.id || management.id===k.id).map((k) => {
                   const keyBusy=pendingActions.includes(k.id);
                   const keyEdit=keyEdits[k.id];
                   const runKey=(fn:()=>Promise<void>)=>run(fn,k.id);
@@ -1058,7 +1042,7 @@ function App() {
                 <p>{currentGuideKey?.last_seen_at ? "已观察到该 Key 的请求：" + when(currentGuideKey.last_seen_at) : "尚未观察到该 Key 的请求。创建 Key 不代表客户端已经接入。"}</p>
                 <button className="text" onClick={() => {
                   setRequestQuery(new URLSearchParams({ client_key_id: guideKey.id, origin: "client" }).toString());
-                  setFilter(""); setPage("请求");
+                  setFilter(""); setPage("请求");setManagement(null);
                 }}>查看这个工具的调用 →</button>
                 <details><summary>已有配置的手动接入模板</summary><pre>{template}</pre></details>
                 <p className="hint">
@@ -1082,7 +1066,7 @@ function App() {
             )}
           </>
         )}
-        {page === "请求" && (
+        {operationPage === "请求" && (
           <section className="panel">
             {(status.queued||[]).length>0&&<section><h3>等待派发</h3>{status.queued.map((q:any)=><div className="tool-row" key={q.id}><div><code>{q.id}</code><span>排队阶段 {q.stage} · 尚未扣除RPM或预算 · {new Date(q.queued_at).toLocaleTimeString()}</span></div><button disabled={busy} onClick={()=>run(async()=>{await api(`requests/${q.id}/cancel`,"POST",{version:q.version});await refresh()})}>取消排队</button></div>)}</section>}
             <div className="section-title">
@@ -1214,13 +1198,7 @@ function App() {
               <button
                 className="secondary"
                 onClick={() =>
-                  run(async () => {
-                    const v = await api(
-                      requestPath(cursor),
-                    );
-                    setRequests((old) => [...old, ...v.items]);
-                    setCursor(v.next_cursor);
-                  })
+                  loadMoreRequests()
                 }
               >
                 加载更多
@@ -1228,7 +1206,7 @@ function App() {
             )}
           </section>
         )}
-        {page === "用量" && (
+        {operationPage === "用量" && (
           <>
             <div className="metrics">
               {[
@@ -1324,7 +1302,7 @@ function App() {
             </section>
           </>
         )}
-        {page === "设置" && (
+        {operationPage === "设置" && (
           <>
             <section className="panel">
               <h2>本机运行</h2>
@@ -1419,35 +1397,9 @@ function App() {
             </section>
           </>
         )}
-        {detail && (
-          <section className="panel detail">
-            <div className="section-title">
-              <h2>请求详情</h2>
-              <button className="text" onClick={() => {detailRevision.current++;setDetail(null)}}>
-                关闭 ×
-              </button>
-            </div>
-            <dl className="settings-list">
-              <div><dt>请求编号</dt><dd><code>{detail.request?.id}</code></dd></div>
-              <div><dt>来源 / 客户端</dt><dd>{detail.request?.source_name} / {detail.request?.client_name}</dd></div>
-              <div><dt>客户端协议</dt><dd>{label(detail.request?.protocol || "responses")}</dd></div>
-              <div><dt>请求 / 返回模型</dt><dd>{detail.request?.requested_model} / {detail.request?.reported_model || "未知"}</dd></div>
-              <div><dt>上游结果</dt><dd>{label(detail.request?.upstream_status || "unknown")}</dd></div>
-              <div><dt>客户端接收</dt><dd>{label(detail.request?.delivery_status || "unknown")}</dd></div>
-              <div><dt>观察完整性</dt><dd>{label(detail.request?.observation_status || "unknown")}</dd></div>
-              <div><dt>Token · 输入 / 输出</dt><dd>{format(detail.request?.usage?.input_tokens)} / {format(detail.request?.usage?.output_tokens)}</dd></div>
-              {detail.request?.error_stage && <div><dt>错误阶段</dt><dd>{detail.request.error_stage}</dd></div>}
-            </dl>
-            {detail.request?.error_summary && <p role="status">{detail.request.error_summary}</p>}
-            <h3>逐次尝试</h3>{detail.attempts?.map((attempt:any)=><p key={attempt.attempt_id}>第{attempt.sequence}次 · {attempt.source_name} · {attempt.sent_model} · {label(attempt.status)} · {attempt.error_summary||""}</p>)}
-            {detail.accounting && <RequestAccounting api={api} requestId={detail.request.id} accounting={detail.accounting} onReconciled={async()=>setDetail(await api(`requests/${detail.request.id}`))}/>}
-            <details><summary>技术详情</summary><pre>{JSON.stringify(detail, null, 2)}</pre></details>
-          </section>
-        )}
-        <footer className="workspace-footer">
-          COVE · 栖港 <span>你的模型，泊在一处。</span>
-        </footer>
-      </main>
+      </div>}
+      </dialog>
+
           <dialog
             ref={sourceDialog}
             className="modal"
@@ -1530,6 +1482,7 @@ function App() {
                   placeholder="实际模型 ID，多个用英文逗号分隔"
                 />
               </label>
+              {form.kind === "codex_subscription" && <p className="hint">模型可以留空。先登录 ChatGPT，再到模型页读取该账号的可用模型目录。</p>}
               <p className="hint">
                 凭据保存在 Cove 私有目录。更换地址或凭据会使旧会话绑定失效；跨站更换地址必须提供新目标凭据。
               </p>

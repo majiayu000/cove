@@ -88,7 +88,7 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 	}
 	v := &memorySecrets{values: map[string]string{"administrator": "test-administrator", "source": "SENTINEL_UPSTREAM_SECRET"}}
 	server := httptest.NewUnstartedServer(nil)
-	c := Config{Listen: server.Listener.Addr().String(), DataDir: dir, MaxBody: 8 << 20, MaxResponse: 16 << 20, MaxEvent: 1 << 20, MaxConcurrent: 8, HeaderTimeout: 2, IdleTimeout: 2, TotalTimeout: 10, RetentionDays: 7, Codex: CodexConfig{BaseURL: up.URL, AuthBaseURL: up.URL, ClientID: "synthetic-client", ClientVersion: "test"}}
+	c := Config{Listen: server.Listener.Addr().String(), DataDir: dir, MaxBody: 8 << 20, MaxResponse: 16 << 20, MaxEvent: 1 << 20, MaxConcurrent: 8, HeaderTimeout: 2, IdleTimeout: 2, TotalTimeout: 10, RetentionDays: 7, AllowPaidFallback: true, SubscriptionQuotaThreshold: 5, Codex: CodexConfig{BaseURL: up.URL, AuthBaseURL: up.URL, ClientID: "synthetic-client", ClientVersion: "test"}}
 	a, err := New(c, store, v, nil)
 	if err != nil {
 		t.Fatal(err)

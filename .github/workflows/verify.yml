@@ -1,0 +1,105 @@
+name: Verify and package Cove
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Make on Windows
+        if: runner.os == 'Windows'
+        run: choco install make --no-progress -y
+      - run: make build
+      - run: make check
+      - run: make test
+      - name: Install browser
+        working-directory: web
+        run: npx playwright install chrome
+      - name: Verify v13 in an isolated instance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          config = json.loads(Path('config.example.json').read_text())
+          config.update(listen='127.0.0.1:5573', data_dir=str(temp/'cove-v13-data'))
+          import socket
+          with socket.socket() as callback:
+              callback.bind(('127.0.0.1', 0))
+              config['codex']['redirect_uri'] = f'http://127.0.0.1:{callback.getsockname()[1]}/auth/callback'
+          (temp/'cove-v13-config.json').write_text(json.dumps(config))
+          PY
+          ./bin/gatt -config "$RUNNER_TEMP/cove-v13-config.json" -background serve > "$RUNNER_TEMP/cove-v13-server.log" 2>&1 &
+          cove_pid=$!
+          trap 'kill "$cove_pid" 2>/dev/null || true; wait "$cove_pid" 2>/dev/null || true' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail --silent --output /dev/null http://127.0.0.1:5573/
+          COVE_TEST_BASE=http://127.0.0.1:5573 node web/v13-smoke.mjs
+      - name: Package the verified build
+        run: |
+          bash scripts/package-platform.sh
+          cp bin/build-evidence.json "bin/build-evidence-$(go env GOOS)-$(go env GOARCH).json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cove-development-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            bin/cove-development-*.tar.gz
+            bin/cove-development-*.tar.gz.sha256
+            bin/build-evidence-*.json
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: v13-browser-evidence-${{ matrix.os }}
+          path: test-results/v13/
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cove-development-*
+          merge-multiple: true
+          path: release
+      - name: Publish development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COVE_RELEASE_TAG: v0.1.0-dev.${{ github.run_number }}
+          COVE_RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          cd release
+          sha256sum -c cove-development-*.tar.gz.sha256
+          gh release create "$COVE_RELEASE_TAG" cove-development-*.tar.gz cove-development-*.tar.gz.sha256 build-evidence-*.json --target "$COVE_RELEASE_COMMIT" --prerelease --title "Cove $COVE_RELEASE_TAG" --notes 'macOS、Linux 和 Windows 原生开发包，包含 v13 控制台。各平台构建、静态检查、race 测试与模拟上游浏览器验收通过后发布。未签名；真实订阅、多轮工具与三协议调用须单独验收。'

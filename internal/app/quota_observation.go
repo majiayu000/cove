@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"math/big"
@@ -951,18 +952,26 @@ func (a *App) codexQuotaHistoryAPI(w http.ResponseWriter, r *http.Request, src S
 // Root calls this before direct and route admission. Additional named pools
 // retain their identity but cannot block all models without a proven scope.
 func quotaDispatchBlocked(src Source, model, operation string, now time.Time) (bool, string) {
+	return quotaBelowThreshold(src, model, operation, now, 0)
+}
+
+// Unknown, expired or different-generation observations never imply exhaustion.
+func quotaBelowThreshold(src Source, model, operation string, now time.Time, threshold int) (bool, string) {
 	q := quotaSnapshot(src)
 	if q.Status != "available" || q.Scope.Account != src.AccountID || q.ObservedAt == nil || q.ExpiresAt == nil || !q.ExpiresAt.After(now) || q.ObservedAt.After(now.Add(time.Minute)) || q.AccountGeneration != src.AccountGeneration || q.SourceGeneration != src.Generation {
 		return false, ""
 	}
 	for _, w := range q.Windows {
-		if !w.AccountWide || w.Scope.Account != src.AccountID || w.Status != "available" || w.UsedPercent == nil || *w.UsedPercent != 100 || w.ResetAt == nil || !w.ResetAt.After(now) || !w.ExpiresAt.After(now) {
+		if !w.AccountWide || w.Scope.Account != src.AccountID || w.Status != "available" || w.UsedPercent == nil || *w.UsedPercent < float64(100-threshold) || w.ResetAt == nil || !w.ResetAt.After(now) || !w.ExpiresAt.After(now) {
 			continue
 		}
 		if w.Scope.Model != "" && w.Scope.Model != model || w.Scope.Operation != "" && w.Scope.Operation != operation {
 			continue
 		}
-		return true, "已观测订阅窗口耗尽；等待新观测或额度状态过期"
+		if *w.UsedPercent == 100 {
+			return true, "已观测订阅窗口耗尽；等待新观测或额度状态过期"
+		}
+		return true, fmt.Sprintf("已观测订阅窗口剩余额度不高于 %d%% 调度阈值", threshold)
 	}
 	return false, ""
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -95,6 +96,36 @@ func (s *Store) route(rid string) (Route, error) {
 	}
 	return v, err
 }
+
+// Caller holds mu. Reuse the actual configuration preview without advancing
+// weights, reserving capacity or contacting an upstream provider.
+func (a *App) routeRuntime(route Route) (map[string]any, error) {
+	out := map[string]any{"active_requests": a.routeActive[route.ID], "queued_requests": 0, "candidates": []CandidateReason{}, "full_request_eligibility": false}
+	queued := 0
+	for _, q := range a.queued {
+		if q.RouteID == route.ID {
+			queued++
+		}
+	}
+	out["queued_requests"] = queued
+	var model string
+	err := a.Store.DB.QueryRow("SELECT public_model FROM model_aliases WHERE route_id=? ORDER BY public_model LIMIT 1", route.ID).Scan(&model)
+	if err == sql.ErrNoRows {
+		out["error"] = "未绑定公开模型名，候选资格尚未预览"
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	source, sent, reasons, selectionErr := a.selectSource(ClientKey{RouteID: route.ID}, model, "responses", true)
+	out["public_model"], out["protocol"], out["candidates"], out["error"] = model, "responses", reasons, errorMessage(selectionErr)
+	out["selected_candidate"] = nil
+	if selectionErr == nil {
+		out["selected_candidate"] = map[string]any{"source_id": source.ID, "upstream_model": sent}
+	}
+	return out, nil
+}
+
 func (a *App) routesAPI(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) == 4 && parts[3] == "preview" {
@@ -125,11 +156,24 @@ func (a *App) routesAPI(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = rows.Err()
 		}
+		err = errors.Join(err, rows.Close())
 		if err != nil {
 			fail(w, 503, storageError().Error(), "")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": items, "next_cursor": nil})
+		views := make([]any, 0, len(items))
+		for _, route := range items {
+			runtime, err := a.routeRuntime(route)
+			if err != nil {
+				fail(w, 503, storageError().Error(), "")
+				return
+			}
+			views = append(views, struct {
+				Route
+				Runtime map[string]any `json:"runtime"`
+			}{route, runtime})
+		}
+		writeJSON(w, 200, map[string]any{"items": views, "next_cursor": nil})
 		return
 	}
 	var v Route
@@ -145,7 +189,15 @@ func (a *App) routesAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == "GET" {
-			writeJSON(w, 200, v)
+			runtime, err := a.routeRuntime(v)
+			if err != nil {
+				fail(w, 503, storageError().Error(), "")
+				return
+			}
+			writeJSON(w, 200, struct {
+				Route
+				Runtime map[string]any `json:"runtime"`
+			}{v, runtime})
 			return
 		}
 		if r.Method == "DELETE" {
@@ -470,7 +522,11 @@ func (a *App) selectSourceExcluding(k ClientKey, model, protocol string, preview
 			if len(plans) > 0 && plans[0].Operation != "" {
 				operation = plans[0].Operation
 			}
-			if blocked, reason := quotaDispatchBlocked(src, m.UpstreamModel, operation, time.Now()); blocked {
+			threshold := 0
+			if src.Kind == "codex_subscription" {
+				threshold = a.Config.SubscriptionQuotaThreshold
+			}
+			if blocked, reason := quotaBelowThreshold(src, m.UpstreamModel, operation, time.Now(), threshold); blocked {
 				c.ExcludedReason = reason
 			}
 		}
@@ -481,6 +537,8 @@ func (a *App) selectSourceExcluding(k ClientKey, model, protocol string, preview
 	preferred := ""
 	if len(plans) > 0 {
 		plan := plans[0]
+		plan.SubscriptionFirst = true
+		plan.AllowPaidFallback = a.Config.AllowPaidFallback
 		result, e := a.policyState.Filter(route.RoutePolicy, route.Strategy, plan, all, time.Now())
 		reasons = result.Reasons
 		if plan.SnapshotOut != nil {
@@ -493,7 +551,6 @@ func (a *App) selectSourceExcluding(k ClientKey, model, protocol string, preview
 		preferred = result.PreferredModelID
 	} else {
 		anchor := policyModelAnchor(all)
-		priority := math.MaxInt
 		a.policyState.mu.Lock()
 		for _, c := range all {
 			reason := CandidateReason{ModelID: c.Model.ID, SourceID: c.Source.ID, AccountID: c.Source.AccountID, UpstreamModel: c.Model.UpstreamModel}
@@ -508,13 +565,15 @@ func (a *App) selectSourceExcluding(k ClientKey, model, protocol string, preview
 				reason.Eligible = true
 				reason.Reason = "配置可路由，具体请求能力与真实调用另行验证"
 				eligible = append(eligible, c)
-				if c.Member.Priority < priority {
-					priority = c.Member.Priority
-				}
 			}
 			reasons = append(reasons, reason)
 		}
 		a.policyState.mu.Unlock()
+		eligible = preferSubscriptions(eligible, reasons, a.Config.AllowPaidFallback)
+		priority := math.MaxInt
+		for _, c := range eligible {
+			priority = min(priority, c.Member.Priority)
+		}
 		eligible = slices.DeleteFunc(eligible, func(c RoutingPolicyCandidate) bool { return c.Member.Priority != priority })
 	}
 	slices.SortFunc(eligible, func(x, y RoutingPolicyCandidate) int { return strings.Compare(x.Model.ID, y.Model.ID) })

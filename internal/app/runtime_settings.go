@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -13,16 +14,18 @@ import (
 )
 
 type settingsChanges struct {
-	MaxConcurrent *int    `json:"max_concurrent,omitempty"`
-	MaxBody       *int64  `json:"max_body_bytes,omitempty"`
-	MaxResponse   *int64  `json:"max_response_bytes,omitempty"`
-	MaxEvent      *int    `json:"max_event_bytes,omitempty"`
-	IdleTimeout   *int    `json:"idle_timeout_seconds,omitempty"`
-	TotalTimeout  *int    `json:"total_timeout_seconds,omitempty"`
-	RetentionDays *int    `json:"retention_days,omitempty"`
-	Listen        *string `json:"listen,omitempty"`
-	DataDir       *string `json:"data_dir,omitempty"`
-	HeaderTimeout *int    `json:"header_timeout_seconds,omitempty"`
+	AllowPaidFallback          *bool   `json:"allow_paid_fallback,omitempty"`
+	SubscriptionQuotaThreshold *int    `json:"subscription_quota_threshold,omitempty"`
+	MaxConcurrent              *int    `json:"max_concurrent,omitempty"`
+	MaxBody                    *int64  `json:"max_body_bytes,omitempty"`
+	MaxResponse                *int64  `json:"max_response_bytes,omitempty"`
+	MaxEvent                   *int    `json:"max_event_bytes,omitempty"`
+	IdleTimeout                *int    `json:"idle_timeout_seconds,omitempty"`
+	TotalTimeout               *int    `json:"total_timeout_seconds,omitempty"`
+	RetentionDays              *int    `json:"retention_days,omitempty"`
+	Listen                     *string `json:"listen,omitempty"`
+	DataDir                    *string `json:"data_dir,omitempty"`
+	HeaderTimeout              *int    `json:"header_timeout_seconds,omitempty"`
 }
 type runtimeSettings struct {
 	Version       int             `json:"version"`
@@ -46,6 +49,12 @@ func (s *Store) readRuntimeSettings() (runtimeSettings, error) {
 	return v, err
 }
 func (c settingsChanges) apply(config *Config) {
+	if c.AllowPaidFallback != nil {
+		config.AllowPaidFallback = *c.AllowPaidFallback
+	}
+	if c.SubscriptionQuotaThreshold != nil {
+		config.SubscriptionQuotaThreshold = *c.SubscriptionQuotaThreshold
+	}
 	if c.MaxConcurrent != nil {
 		config.MaxConcurrent = *c.MaxConcurrent
 	}
@@ -67,6 +76,12 @@ func (c settingsChanges) apply(config *Config) {
 	if c.RetentionDays != nil {
 		config.RetentionDays = *c.RetentionDays
 	}
+}
+func validateSubscriptionQuotaThreshold(n int) error {
+	if n < 0 || n > 100 {
+		return fmt.Errorf("订阅剩余额度阈值必须为0到100的百分比")
+	}
+	return nil
 }
 func mergeSettings(old, next settingsChanges) settingsChanges {
 	data := map[string]json.RawMessage{}
@@ -106,6 +121,10 @@ func (a *App) settingsAPI(w http.ResponseWriter, r *http.Request) {
 		in.Changes.apply(&candidate)
 		if candidate.MaxConcurrent < 1 || candidate.MaxBody < 1 || candidate.MaxResponse < 1 || candidate.MaxEvent < 1 || candidate.IdleTimeout < 1 || candidate.TotalTimeout < 1 || candidate.RetentionDays < 1 || candidate.RetentionDays > 365 {
 			fail(w, 400, "限制与超时必须为正数，保留期为1到365天", "changes")
+			return
+		}
+		if err := validateSubscriptionQuotaThreshold(candidate.SubscriptionQuotaThreshold); err != nil {
+			fail(w, 400, err.Error(), "changes.subscription_quota_threshold")
 			return
 		}
 		if in.Changes.Listen != nil {

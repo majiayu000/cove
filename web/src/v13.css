@@ -1,0 +1,68 @@
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url(/assets/geist.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url(/assets/geist-mono.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 200 500;
+  font-display: block;
+  src: url(/assets/material-symbols-rounded.woff2) format('woff2');
+}
+
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
+
+html{--font:"Geist",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--mono:"Geist Mono","SF Mono",ui-monospace,Menlo,monospace;
+--bg:oklch(0.975 0.006 255);--panel:oklch(1 0 0);--glass:oklch(1 0 0 / 0.72);--glassBd:oklch(0.35 0.06 260 / 0.10);--sunk:oklch(0.95 0.008 255 / 0.8);--hover:oklch(0.55 0.15 235 / 0.06);--ink:oklch(0.20 0.02 265);--ink2:oklch(0.48 0.02 262);--ink3:oklch(0.62 0.02 262);--line:oklch(0.35 0.06 260 / 0.12);--line2:oklch(0.35 0.06 260 / 0.07);--gridc:oklch(0.4 0.08 260 / 0.07);
+--accent:oklch(0.56 0.16 235);--accent2:oklch(0.56 0.22 300);--accentHover:oklch(0.50 0.16 235);--accentSoft:oklch(0.56 0.16 235 / 0.14);--accentInk:oklch(1 0 0);
+--ok:oklch(0.66 0.17 155);--okT:oklch(0.50 0.13 155);--warn:oklch(0.76 0.15 75);--warnT:oklch(0.55 0.12 65);--err:oklch(0.62 0.21 20);--errT:oklch(0.54 0.19 20);
+--bar:oklch(0.99 0.004 255 / 0.66);--sh:inset 0 1px 0 oklch(1 0 0 / 0.9),0 1px 2px oklch(0.3 0.05 260 / 0.05),0 20px 50px -24px oklch(0.4 0.12 260 / 0.25);--tile:oklch(1 0 0);--tileSh:inset 0 0 0 1px oklch(0.35 0.06 260 / 0.10),0 2px 6px -2px oklch(0.3 0.08 260 / 0.15);--shL:0 0 0 1px oklch(0.35 0.06 260 / 0.08),0 30px 80px -20px oklch(0.3 0.1 260 / 0.35);--scrim:oklch(0.25 0.04 265 / 0.30);--code:oklch(0.965 0.008 255)}
+html[data-mode="dark"]{--bg:oklch(0.135 0.022 268);--panel:oklch(0.19 0.025 268);--glass:oklch(0.21 0.03 270 / 0.52);--glassBd:oklch(0.85 0.06 245 / 0.11);--sunk:oklch(0.10 0.02 268 / 0.6);--hover:oklch(0.82 0.13 205 / 0.06);--ink:oklch(0.97 0.006 250);--ink2:oklch(0.76 0.02 258);--ink3:oklch(0.58 0.03 262);--line:oklch(0.85 0.06 245 / 0.13);--line2:oklch(0.85 0.06 245 / 0.07);--gridc:oklch(0.85 0.08 230 / 0.06);
+--accent:oklch(0.82 0.14 205);--accent2:oklch(0.72 0.20 305);--accentHover:oklch(0.88 0.12 205);--accentSoft:oklch(0.82 0.14 205 / 0.18);--accentInk:oklch(0.15 0.03 262);
+--ok:oklch(0.84 0.18 155);--okT:oklch(0.84 0.16 155);--warn:oklch(0.85 0.15 80);--warnT:oklch(0.86 0.13 80);--err:oklch(0.72 0.19 20);--errT:oklch(0.76 0.17 20);
+--bar:oklch(0.135 0.022 268 / 0.55);--sh:inset 0 1px 0 oklch(1 0 0 / 0.07),0 30px 60px -30px oklch(0 0 0 / 0.7);--tile:oklch(0.27 0.035 268 / 0.85);--tileSh:inset 0 0 0 1px oklch(1 0 0 / 0.09),0 6px 14px -6px oklch(0 0 0 / 0.6);--shL:0 0 0 1px oklch(0.85 0.06 245 / 0.14),0 40px 100px -20px oklch(0 0 0 / 0.8),0 0 80px -30px color-mix(in oklch, var(--accent) 40%, transparent);--scrim:oklch(0.08 0.02 268 / 0.62);--code:oklch(0.11 0.02 268)}
+html[data-mode="dark"] [data-mono="1"]{filter:invert(1)}
+html[data-lang="en"] [data-l="zh"]{display:none !important}
+html:not([data-lang="en"]) [data-l="en"]{display:none !important}
+[data-i]{font-family:"Material Symbols Rounded";font-weight:normal;font-style:normal;line-height:1;letter-spacing:normal;text-transform:none;white-space:nowrap;direction:ltr;font-feature-settings:"liga";-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 350,"opsz" 20;display:inline-block}
+*{box-sizing:border-box}
+@keyframes covedash{to{stroke-dashoffset:-16}}
+@keyframes covepulse{0%{box-shadow:0 0 0 0 color-mix(in oklch, var(--ok) 50%, transparent)}100%{box-shadow:0 0 0 8px transparent}}
+body{margin:0;min-height:100vh;background:radial-gradient(1100px 520px at 12% -12%,color-mix(in oklch, var(--accent) 20%, transparent),transparent 62%),radial-gradient(900px 520px at 92% -6%,color-mix(in oklch, var(--accent2) 22%, transparent),transparent 62%),radial-gradient(900px 600px at 50% 115%,color-mix(in oklch, var(--accent2) 10%, transparent),transparent 60%) fixed,var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"ss01"}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background-image:linear-gradient(var(--gridc) 1px,transparent 1px),linear-gradient(90deg,var(--gridc) 1px,transparent 1px);background-size:44px 44px;-webkit-mask-image:radial-gradient(ellipse 85% 65% at 50% 0%,#000 25%,transparent 78%);mask-image:radial-gradient(ellipse 85% 65% at 50% 0%,#000 25%,transparent 78%)}
+@keyframes coveglow{0%,100%{opacity:.85}50%{opacity:.4}}
+@keyframes covesweep{to{transform:translateX(220%)}}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accentHover);text-decoration:underline}
+button,input,select{font-family:inherit;color:inherit}
+input::placeholder{color:var(--ink3)}
+::selection{background:var(--accentSoft)}

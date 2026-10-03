@@ -11,6 +11,7 @@ test:
 check:
 	go vet ./...
 	npm --prefix web run typecheck
+	npm --prefix web run test:v13
 dev: build
 	./bin/gatt -config config.example.json serve
 package: build

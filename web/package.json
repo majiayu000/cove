@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "dev": "vite --host 127.0.0.1 --port 5570 --strictPort"
+    "dev": "vite --host 127.0.0.1 --port 5570 --strictPort",
+    "test:v13": "node --experimental-strip-types --test v13-state.test.mjs"
   },
   "dependencies": {
     "react": "19.2.0",
