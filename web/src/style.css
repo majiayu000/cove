@@ -78,6 +78,8 @@ td small { display:block; }
 .modal>form { padding:16px;display:grid;gap:14px; }
 .management-sheet .panel { box-shadow:none; }
 .request-extra { padding:0 16px 20px; }
+.request-extra .request-links { display:flex; flex-wrap:wrap; gap:8px; }
+.request-extra p, .request-extra li, .request-extra code { overflow-wrap:anywhere; }
 .secret,.login-operation { background:var(--sunk);border:1px solid var(--line2);border-radius:8px;padding:12px;display:grid;gap:8px; }
 .secret code { overflow-wrap:anywhere; }
 .login-shell { max-width:480px;margin:12vh auto;padding:24px;background:var(--glass);border:1px solid var(--glassBd);border-radius:18px;box-shadow:var(--sh); }

@@ -1,5 +1,5 @@
 import { chromium, expect } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createServer } from "node:http";
 
@@ -38,6 +38,7 @@ async function api(path, method = "GET", body) {
     { path, method, body },
   );
 }
+let omitUsage = false;
 const upstream = createServer((req, res) => {
   req.resume();
   req.on("end", () => {
@@ -55,7 +56,7 @@ const upstream = createServer((req, res) => {
             content: [{ type: "output_text", text: "UI test complete" }],
           },
         ],
-        usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 },
+        ...(omitUsage ? {} : { usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 } }),
       }),
     );
   });
@@ -87,6 +88,7 @@ try {
     await expect(
       page.getByRole("heading", { name: heading, exact: true }),
     ).toBeVisible();
+    if (nav === "请求") await expect(page.getByText("还没有调用记录。接入客户端并发送请求后会显示在这里。", { exact: true })).toBeVisible();
     await page.screenshot({
       path: `${output}/dark-${nav}.png`,
       fullPage: true,
@@ -238,9 +240,27 @@ try {
   await expect(
     drawer.getByText("v13-test-model", { exact: false }).first(),
   ).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: "尝试 1 的选择依据", exact: true })).toBeVisible();
+  await expect(drawer.getByText("配置版本", { exact: false })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get("request_id")).toBeTruthy();
+  const requestURL = page.url();
+  await page.reload();
+  await expect(drawer).toBeVisible();
+  await expect(page.getByRole("heading", { name: "请求", exact: true })).toBeVisible();
+  expect(page.url()).toBe(requestURL);
+  await drawer.getByRole("button", { name: "来源与账号", exact: true }).click();
+  const sourceSettings = page.getByRole("dialog", { name: "来源管理", exact: true });
+  await expect(sourceSettings).toBeVisible();
+  await expect(sourceSettings.locator(".workspace")).toHaveAttribute("data-selection", mockSource.id);
+  await expect(sourceSettings.locator(".source-card")).toHaveCount(1);
+  expect(new URL(page.url()).searchParams.has("request_id")).toBe(false);
+  await sourceSettings.getByRole("button", { name: "关闭管理", exact: true }).click();
+  await page.goto(requestURL);
+  await expect(drawer).toBeVisible();
   await page.screenshot({ path: `${output}/request-drawer.png` });
   await page.keyboard.press("Escape");
   await expect(drawer).not.toBeVisible();
+  expect(new URL(page.url()).searchParams.has("request_id")).toBe(false);
   await api(`sources/${mockSource.id}/test`, "POST", { model: "v13-test-model" });
   const firstPage = await api("requests?limit=1");
   if (!firstPage.next_cursor) throw new Error("Request pagination fixture has no second page");
@@ -261,6 +281,42 @@ try {
   await expect(page.getByRole("button").filter({ hasText: secondPage.items[0].id })).toBeVisible();
   await expect(page.getByRole("button", { name: "加载更多请求", exact: true })).toHaveCount(0);
   await page.unroute(requestsURL);
+  // A late unfiltered page must not replace the newly selected failure filter.
+  let delayed = false, releaseOldPage, oldPageSeen, oldPageDone;
+  const oldPageReady = new Promise(resolve => { oldPageSeen = resolve; });
+  const oldPageReleased = new Promise(resolve => { releaseOldPage = resolve; });
+  const oldPageHandled = new Promise(resolve => { oldPageDone = resolve; });
+  await page.route(requestsURL, async route => {
+    const response = await route.fetch();
+    let isOldPage = false;
+    if (!delayed && !new URL(route.request().url()).searchParams.has("status")) {
+      delayed = true;
+      isOldPage = true;
+      oldPageSeen();
+      await oldPageReleased;
+    }
+    try { await route.fulfill({ response }); }
+    finally { if (isOldPage) oldPageDone(); }
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await oldPageReady;
+  try {
+    const filteredResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/admin/requests" && new URL(response.url()).searchParams.get("status") === "failed");
+    await page.getByRole("button", { name: /^失败\s/ }).click();
+    await filteredResponse;
+    await expect(page.getByText("当前筛选没有匹配的请求。", { exact: true })).toBeVisible();
+    const oldResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/admin/requests" && !new URL(response.url()).searchParams.has("status"));
+    releaseOldPage();
+    await oldResponse;
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await expect(page.getByRole("button").filter({ hasText: firstPage.items[0].id })).toHaveCount(0);
+  } finally {
+    releaseOldPage();
+    await oldPageHandled;
+    await page.unroute(requestsURL);
+  }
+  await page.getByRole("button", { name: /^全部\s/ }).click();
+  await expect(page.getByRole("button").filter({ hasText: firstPage.items[0].id })).toBeVisible();
   await api("models", "POST", {
     source_id: source.id,
     upstream_model: "v13-ui-extra",
@@ -338,6 +394,78 @@ try {
   expect(gatewayStatus.status, gatewayStatus.error).toBe(200);
   await expect.poll(async () => (await api("client-keys")).find((k) => k.id === createdKey.id).last_seen_at).toBeTruthy();
   await manager.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  // Missing provider usage remains unknown until a user explicitly reconciles it.
+  omitUsage = true;
+  const unknownCall = await callGateway();
+  omitUsage = false;
+  expect(unknownCall.status, unknownCall.error).toBe(200);
+  const unknownRequest = (await api(`requests?client_key_id=${createdKey.id}`)).items[0];
+  await expect.poll(async () => (await api(`requests/${unknownRequest.id}`)).accounting.reservations[0].status).toBe("pending_reconciliation");
+  await page.goto(`${base}?request_id=${encodeURIComponent(unknownRequest.id)}`);
+  await expect(drawer).toBeVisible();
+  await drawer.getByLabel("核对后的实际金额", { exact: true }).fill("0.025");
+  await drawer.getByLabel("核对说明", { exact: true }).fill("Isolated synthetic invoice comparison");
+  await drawer.getByLabel("证据引用", { exact: true }).fill("fixture://v13/invoice");
+  await drawer.getByRole("button", { name: "保存人工核对", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "保存人工核对", exact: true })).toHaveCount(0);
+  const reconciled = await api(`requests/${unknownRequest.id}`);
+  expect(reconciled.request.estimated_cost).toBeNull();
+  expect(reconciled.accounting.reservations[0].status).toBe("settled");
+  expect(Number(reconciled.accounting.reservations[0].settled)).toBe(0.025);
+  await drawer.getByRole("button", { name: "Key 权限与限额", exact: true }).click();
+  await expect(manager).toBeVisible();
+  await expect(manager.locator(".workspace")).toHaveAttribute("data-selection", createdKey.id);
+  await manager.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  await page.keyboard.press("Meta+k");
+  await palette.locator("input").fill("预算");
+  await page.keyboard.press("Enter");
+  const budgetSettings = page.getByRole("dialog", { name: "预算管理", exact: true });
+  await expect(budgetSettings).toBeVisible();
+  const budgetLimit = budgetSettings.getByLabel(`${budget.name} 金额上限`, { exact: true });
+  await budgetLimit.fill("120");
+  await api(`budgets/${budget.id}`, "PATCH", { version: budget.version, amount_limit: "110" });
+  const limitForm = budgetLimit.locator("..").locator("..");
+  await limitForm.getByRole("button", { name: "保存上限", exact: true }).click();
+  const budgetConflict = budgetSettings.getByRole("region", { name: `${budget.name} 上限版本冲突`, exact: true });
+  await expect(budgetConflict).toBeVisible();
+  await expect(budgetLimit).toHaveValue("120");
+  await expect(budgetConflict).toContainText("当前上限 110");
+  await budgetConflict.getByRole("button", { name: "使用当前版本，保留我的输入", exact: true }).click();
+  await limitForm.getByRole("button", { name: "保存上限", exact: true }).click();
+  await expect.poll(async () => (await api(`budgets/${budget.id}`)).amount_limit).toBe("120");
+  await expect(budgetConflict).toHaveCount(0);
+  await budgetSettings.getByLabel("预算名称", { exact: true }).fill("v13-temporary-budget");
+  await budgetSettings.getByLabel("作用域", { exact: true }).selectOption("key");
+  await budgetSettings.getByLabel("API Key", { exact: true }).selectOption(createdKey.id);
+  await budgetSettings.getByLabel("周期金额上限", { exact: true }).fill("5");
+  await budgetSettings.getByRole("button", { name: "创建预算", exact: true }).click();
+  const temporaryBudget = budgetSettings.locator("article").filter({ has: page.getByRole("heading", { name: "v13-temporary-budget", exact: true }) });
+  await expect(temporaryBudget).toBeVisible();
+  await temporaryBudget.getByRole("button", { name: "删除无引用预算", exact: true }).click();
+  await expect(temporaryBudget).toHaveCount(0);
+  await page.screenshot({ path: `${output}/budget-reconciliation.png` });
+  await budgetSettings.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  await page.keyboard.press("Meta+k");
+  await palette.locator("input").fill("运维");
+  await page.keyboard.press("Enter");
+  const operations = page.getByRole("dialog", { name: "运维管理", exact: true });
+  await expect(operations).toBeVisible();
+  await operations.getByRole("button", { name: "运行本机诊断", exact: true }).click();
+  await expect(operations.getByRole("button", { name: "下载脱敏诊断", exact: true })).toBeVisible();
+  const doctorDownload = page.waitForEvent("download");
+  await operations.getByRole("button", { name: "下载脱敏诊断", exact: true }).click();
+  const downloaded = await doctorDownload;
+  const doctorData = JSON.parse(readFileSync(await downloaded.path(), "utf8"));
+  expect(doctorData.storage_healthy).toBe(true);
+  expect(doctorData.credential_store_healthy).toBe(true);
+  expect(doctorData.checks.map(c => c.kind)).toEqual(["listener", "storage", "credentials", "routing"]);
+  expect(JSON.stringify(doctorData)).not.toContain(clientKey);
+  expect(JSON.stringify(doctorData)).not.toContain("v13-synthetic-paid-secret");
+  await page.screenshot({ path: `${output}/local-doctor.png` });
+  await operations.getByRole("button", { name: "关闭管理", exact: true }).click();
   await page.reload();
   await page.locator("nav").getByRole("button", { name: "Keys", exact: true }).click();
   await expect(page.locator(".secret")).toHaveCount(0);
@@ -392,6 +520,61 @@ try {
   await expect(nextRequest.getByText("v13-paid-upstream · v13-test-model", { exact: true })).toBeVisible();
   await expect(page.getByText("0/∞", { exact: true }).first()).toBeVisible();
   await page.screenshot({ path: `${output}/subscription-scheduling.png` });
+
+  // Exercise a real safe dial failover and inspect both persisted attempts.
+  const unused = createServer();
+  await new Promise(resolve => unused.listen(0, "127.0.0.1", resolve));
+  const unavailablePort = unused.address().port;
+  await new Promise(resolve => unused.close(resolve));
+  const unavailableSource = await api("sources", "POST", {
+    name: "v13-unavailable-upstream", kind: "api_key", provider: "openai_compatible",
+    account_id: paidAccount.id, models: ["v13-test-model"],
+    base_url: `http://127.0.0.1:${unavailablePort}/v1`, native_protocol: "responses",
+  });
+  const unavailableModel = (await api(`models?source_id=${unavailableSource.id}`)).items[0];
+  for (const model of [routeModel, unavailableModel]) {
+    await api("prices", "POST", {
+      model_id: model.id, currency: "USD", effective_at: priceTime,
+      units: [{ dimension: "input_token", amount: "1", per: "1000000" }, { dimension: "output_token", amount: "2", per: "1000000" }],
+      provenance: { kind: "manual", observed_at: priceTime },
+    });
+  }
+  await api(`routes/${codingRoute.id}`, "PATCH", { version: codingRoute.version, max_attempts: 2,
+    members: [{ model_id: unavailableModel.id, priority: 0, weight: 1 }, { model_id: routeModel.id, priority: 1, weight: 1 }],
+  });
+  const routeKey = await api("client-keys", "POST", { name: "v13-route-key", target: { kind: "route", id: codingRoute.id } });
+  const routedCall = await page.evaluate(async ({ secret }) => {
+    const response = await fetch("/v1/responses", { method: "POST", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "coding", input: "Isolated safe failover", stream: false }),
+    });
+    return { status: response.status, requestId: response.headers.get("X-Gateway-Request-Id") };
+  }, { secret: routeKey.secret });
+  expect(routedCall.status).toBe(200);
+  const routedDetail = await api(`requests/${routedCall.requestId}`);
+  expect(routedDetail.attempts).toHaveLength(2);
+  expect(routedDetail.attempts[0].submission_evidence).toBe("not_sent");
+  await page.goto(`${base}?request_id=${encodeURIComponent(routedCall.requestId)}`);
+  await expect(drawer).toBeVisible();
+  for (const n of [1, 2]) await expect(drawer.getByRole("heading", { name: `尝试 ${n} 的选择依据`, exact: true })).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: "路由选择证据", exact: true })).toHaveCount(2);
+  await expect(drawer.getByText("可候选", { exact: false }).first()).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await drawer.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false);
+  await page.screenshot({ path: `${output}/request-failover-mobile.png`, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await drawer.getByRole("button", { name: "模型设置", exact: true }).click();
+  const modelSettings = page.getByRole("dialog", { name: "模型管理", exact: true });
+  await expect(modelSettings.locator(".workspace")).toHaveAttribute("data-selection", routeModel.id);
+  await expect(modelSettings.locator(".source-card")).toHaveCount(1);
+  await modelSettings.getByRole("button", { name: "关闭管理", exact: true }).click();
+  await page.goto(`${base}?request_id=${encodeURIComponent(routedCall.requestId)}`);
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "路由设置", exact: true }).click();
+  const routeSettings = page.getByRole("dialog", { name: "路由管理", exact: true });
+  await expect(routeSettings.locator(".workspace")).toHaveAttribute("data-selection", codingRoute.id);
+  await routeSettings.getByRole("button", { name: "预览选择", exact: true }).click();
+  await expect(routeSettings.getByText("选择 v13-test-model", { exact: true })).toBeVisible();
+  await routeSettings.getByRole("button", { name: "关闭管理", exact: true }).click();
   await page.keyboard.press("Meta+k");
   await palette.locator("input").fill("工具");
   await page.keyboard.press("Enter");
@@ -415,7 +598,7 @@ try {
   }
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/pagination, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, persisted subscription scheduling, coding preview, account occupancy, management access, mobile overflow, no page errors.",
+    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/deep-link/recovery/pagination/stale-filter, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, manual reconciliation, budget CRUD and explicit CAS resolution, local doctor and redacted download, persisted subscription scheduling, coding preview, real synthetic two-attempt safe dial failover, targeted model/route recovery, account occupancy, management access, mobile overflow, no page errors.",
   );
 } finally {
   await context.close();

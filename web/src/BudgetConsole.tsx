@@ -40,8 +40,8 @@ export function BudgetConsole({ api, keys }: { api: API; keys: { id: string; nam
         setNotice("预算已创建，符合该作用域的后续请求会执行预算检查。");
       }); }}>
         <label>预算名称<input name="name" required maxLength={100}/></label>
-        <label>作用域<select value={scope} onChange={(e) => setScope(e.target.value)}><option value="instance">整个实例</option><option value="key">指定 API Key</option><option value="route">指定路由</option></select></label>
-        {scope !== "instance" && <label>{scope === "key" ? "API Key" : "路由"}<select name="scope_id" required><option value="">选择作用域</option>{(scope === "key" ? keys : routes).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>}
+        <label>作用域<select aria-label="作用域" value={scope} onChange={(e) => setScope(e.target.value)}><option value="instance">整个实例</option><option value="key">指定 API Key</option><option value="route">指定路由</option></select></label>
+        {scope !== "instance" && <label>{scope === "key" ? "API Key" : "路由"}<select name="scope_id" aria-label={scope === "key" ? "API Key" : "路由"} required><option value="">选择作用域</option>{(scope === "key" ? keys : routes).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>}
         <label>币种<input name="currency" defaultValue="USD" pattern="[A-Z]{3}" required/></label>
         <label>周期金额上限<input name="amount" inputMode="decimal" pattern={amountPattern} required/></label>
         <label>模式<select name="mode"><option value="soft">估算软限制</option><option value="strict">本地计费规则准入上限</option></select></label>

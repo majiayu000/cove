@@ -201,6 +201,19 @@ function App() {
     [requestQuery, setRequestQuery] = useState(""),
     [cursor, setCursor] = useState<string | null>(null);
   const detailRevision=useRef(0);
+  function closeDetail() {
+    detailRevision.current++;
+    setDetail(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("request_id");
+    window.history.replaceState(null, "", url);
+  }
+  useEffect(() => {
+    if (!detail?.request?.id) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("request_id", detail.request.id);
+    window.history.replaceState(null, "", url);
+  }, [detail]);
   const [settingsEdits,setSettingsEdits]=useState<Partial<Record<"retention"|"limits",{version:number;formVersion:number;base:any;readError?:string}>>>({});
   function beginSettingsEdit(kind:"retention"|"limits"){
     setSettingsEdits(old=>old[kind]?old:{...old,[kind]:{version:settings.version,formVersion:settings.version,base:settings}});
@@ -309,7 +322,7 @@ function App() {
   }
   useEffect(() => {
     // Remove a stale launch fragment from pages opened by an older running build.
-    if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
+    if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
     const off = () => {
       setLogged(false);
       setFreshKey("");
@@ -323,7 +336,22 @@ function App() {
     return () => window.removeEventListener("gatt-signed-out", off);
   }, []);
   useEffect(() => {
-    if (logged) run(refresh);
+    if (!logged) return;
+    const requestId = new URL(window.location.href).searchParams.get("request_id");
+    if (!requestId) return;
+    const selection = ++detailRevision.current;
+    setPage("请求");
+    void api(`requests/${encodeURIComponent(requestId)}`).then(result => {
+      if (selection === detailRevision.current) setDetail(result);
+    }).catch(error => {
+      if (selection === detailRevision.current) setError(error.message);
+    });
+    return () => { detailRevision.current++; };
+  }, [logged]);
+  useEffect(() => {
+    if (!logged) return;
+    setError("");
+    void refresh().catch(error => setError(error.message));
   }, [logged, filter, requestQuery]);
   useEffect(() => {
     if(!logged || !["概览","来源","路由","请求"].includes(page))return;
@@ -479,8 +507,8 @@ function App() {
         logins={login} onLogin={loginSource}
         onCancelLogin={s=>run(async()=>{await api(`sources/${s.id}/login`, "DELETE");await refresh();},s.id)}
         hasMoreRequests={!!cursor} onMoreRequests={loadMoreRequests}
-        status={status} settings={settings} usage={usage} detail={detail} filter={filter} busy={busy} pending={pendingActions}
-        onPage={next=>{setPage(next);setError("");setNotice("");detailRevision.current++;setDetail(null)}}
+        status={status} settings={settings} usage={usage} detail={detail} filter={filter} requestsFiltered={!!filter || !!requestQuery} busy={busy} pending={pendingActions}
+        onPage={next=>{setPage(next);setError("");setNotice("");closeDetail()}}
         onManage={(next,id)=>{setFreshKey("");setManagement({page:next,id})}}
         onAdd={preset=>{
           const defaults:Partial<Record<string,{kind:string;provider:string;native_protocol:string;base_url:string}>> = {
@@ -496,7 +524,7 @@ function App() {
           setShowAdd(true);
         }} onEdit={edit}
         onDetail={id=>void run(async()=>{const selected=++detailRevision.current;const result=await api(`requests/${id}`);if(selected===detailRevision.current)setDetail(result)})}
-        onCloseDetail={()=>{detailRevision.current++;setDetail(null)}}
+        onCloseDetail={closeDetail}
         onReconcile={async()=>{const result=await api(`requests/${detail.request.id}`);if(detailSelection===detailRevision.current)setDetail(result)}}
         onFilter={next=>{if(next===filter)return;refreshSequence.current++;setCursor(null);setFilter(next)}} onRefresh={refresh} run={run} onError={setError}/>
       {!management && !showAdd && <div className="global-feedback" aria-live="polite">
@@ -843,7 +871,7 @@ function App() {
             </div>
           </>
         )}
-        {(operationPage === "模型" || operationPage === "路由") && <ConsoleModules api={api} sources={sources} clientKeys={keys} page={operationPage} onChanged={refresh} />}
+        {(operationPage === "模型" || operationPage === "路由") && <ConsoleModules api={api} sources={sources} clientKeys={keys} page={operationPage} selectedId={management?.id} onChanged={refresh} />}
         {operationPage === "工具" && <><ClientConsole api={api} onChanged={refresh} initialKind={management?.id?.split(":")[0]} initialModel={management?.id?.split(":").slice(1).join(":")}/><ExtendedProtocolSettings api={api}/><ConfigExtensionsConsole api={api}/><NativeOperationCapabilities api={api} sources={sources} onChanged={refresh}/></>}
         {operationPage === "运维" && <><NotificationSettings api={api}/><ResourceConsole api={api}/><OperationsConsole api={api} status={status}/></>}
         {operationPage === "预算" && <BudgetConsole api={api} keys={keys}/>}

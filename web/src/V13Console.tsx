@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { clientDisplay, gatewayDisplay, keyDisplay, routeMemberDisplay } from "./v13-state";
 import { V13View } from "./V13View";
 import { RequestAccounting } from "./BudgetConsole";
+import { RoutingPolicyEvidence } from "./RoutingPolicyFields";
 
 type API = <T = any>(
   path: string,
@@ -26,6 +27,7 @@ type Props = {
   usage: any;
   detail: any;
   filter: string;
+  requestsFiltered: boolean;
   busy: boolean;
   pending: string[];
   onPage: (page: string) => void;
@@ -1253,6 +1255,34 @@ export function V13Console(p: Props) {
     },
     requestExtra: request && (
       <div className="request-extra">
+        <section className="panel" aria-label={lang === "en" ? "Related configuration" : "关联配置"}>
+          <h3>{lang === "en" ? "Related configuration" : "关联配置"}</h3>
+          <p>{request.source_name || request.source_id || "—"} · {request.sent_model || request.requested_model || "—"}</p>
+          <div className="request-links">
+            {p.sources.some(s => s.id === request.source_id) && <button onClick={() => { p.onCloseDetail(); manage("来源", request.source_id); }}>{lang === "en" ? "Source and account" : "来源与账号"}</button>}
+            {p.keys.some(k => k.id === request.client_key_id) && <button onClick={() => { p.onCloseDetail(); manage("API Keys", request.client_key_id); }}>{lang === "en" ? "API Key permissions" : "Key 权限与限额"}</button>}
+            {request.model_id && <button onClick={() => { p.onCloseDetail(); manage("模型", request.model_id); }}>{lang === "en" ? "Model settings" : "模型设置"}</button>}
+            {request.route_id && <button onClick={() => { p.onCloseDetail(); manage("路由", request.route_id); }}>{lang === "en" ? "Route settings" : "路由设置"}</button>}
+            {p.detail.accounting?.reservations?.length > 0 && <button onClick={() => { p.onCloseDetail(); manage("预算"); }}>{lang === "en" ? "Budget settings" : "预算设置"}</button>}
+            <button onClick={() => p.run(async () => {
+              const url = new URL(window.location.href);
+              url.searchParams.set("request_id", request.id);
+              await navigator.clipboard.writeText(url.href);
+            })}>{lang === "en" ? "Copy request link" : "复制请求链接"}</button>
+          </div>
+        </section>
+        {attempts.map((attempt: any) => <section className="panel" key={attempt.attempt_id} aria-label={`attempt ${attempt.sequence}`}>
+          <h3>{lang === "en" ? `Attempt ${attempt.sequence}: selection details` : `尝试 ${attempt.sequence} 的选择依据`}</h3>
+          <p>{attempt.source_name || attempt.source_id} · {attempt.sent_model || "—"}</p>
+          <p>{lang === "en" ? "Account" : "账号"} <code>{attempt.account_id || "—"}</code> · {lang === "en" ? "Generation" : "代次"} {attempt.account_generation ?? "—"}</p>
+          <p>{lang === "en" ? "Configuration versions" : "配置版本"} · Key {attempt.key_version ?? "—"} · {lang === "en" ? "Source" : "来源"} {attempt.source_version ?? "—"} · {lang === "en" ? "Route" : "路由"} {attempt.route_version ?? "—"} · {lang === "en" ? "Settings" : "设置"} {attempt.config_version ?? "—"}</p>
+          {attempt.routing_policy?.candidates?.length > 0 && <RoutingPolicyEvidence snapshot={attempt.routing_policy}/>}
+          {attempt.selection_reasons?.length ? <ul>{attempt.selection_reasons.map((candidate: any, i: number) => <li key={`${candidate.model_id}:${i}`}>
+            {p.sources.find(s => s.id === candidate.source_id)?.name || candidate.source_id} · {candidate.upstream_model} · {lang === "en" ? candidate.eligible ? "Eligible" : "Excluded" : candidate.eligible ? "可候选" : "已排除"}：{candidate.reason}
+          </li>)}</ul> : <p>{lang === "en" ? "No candidate selection recorded for this attempt." : "本次尝试没有候选选择记录。"}</p>}
+          {attempt.adjustments?.length > 0 && <p>{lang === "en" ? "Parameter adjustments" : "参数调整"}：{attempt.adjustments.join(" · ")}</p>}
+          {attempt.error_stage && <p>{lang === "en" ? "Failure stage" : "失败阶段"}：{attempt.error_stage} · {attempt.error_summary}</p>}
+        </section>)}
         {["streaming", "dispatching"].includes(request.status) && (
           <button
             disabled={p.busy || p.pending.includes(request.id)}
@@ -1316,7 +1346,9 @@ export function V13Console(p: Props) {
           )
         : null,
       "06": !p.requests.length
-        ? empty("尚无匹配的请求。", "No matching requests.")
+        ? p.requestsFiltered
+          ? empty("当前筛选没有匹配的请求。", "No requests match the current filters.")
+          : empty("还没有调用记录。接入客户端并发送请求后会显示在这里。", "No requests yet. Connect a client and send a request to begin.")
         : null,
     },
   };

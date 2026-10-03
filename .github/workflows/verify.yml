@@ -38,9 +38,8 @@ jobs:
       - run: make build
       - run: make check
       - run: make test
-      - name: Install browser
-        working-directory: web
-        run: npx playwright install chrome
+      # All three hosted images include Chrome. The browser test fails if it
+      # cannot launch it; reinstalling it deletes the macOS image's working app.
       - name: Verify v13 in an isolated instance
         shell: bash
         run: |
