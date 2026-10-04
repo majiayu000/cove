@@ -764,8 +764,13 @@ try {
     writeFileSync(resolve(zoomProfile, "Default/Preferences"), JSON.stringify({ partition: { per_host_zoom_levels: { x: { "127.0.0.1": { zoom_level: Math.log(2) / Math.log(1.2), last_modified: "13400000000000000" } } } } }));
     zoomContext = await chromium.launchPersistentContext(zoomProfile, { headless: true, channel: "chrome", viewport: null, args: ["--window-size=1280,900"] });
     const zoomPage = zoomContext.pages()[0];
+    const unzoomed = await zoomPage.evaluate(() => ({ width: innerWidth, ratio: devicePixelRatio }));
     await zoomPage.goto(base);
-    expect(await zoomPage.evaluate(() => ({ width: innerWidth, ratio: devicePixelRatio, scale: visualViewport.scale }))).toEqual({ width: 640, ratio: 2, scale: 1 });
+    const zoomed = await zoomPage.evaluate(() => ({ width: innerWidth, ratio: devicePixelRatio, scale: visualViewport.scale }));
+    expect(zoomed.ratio).toBe(unzoomed.ratio * 2);
+    expect(zoomed.scale).toBe(1);
+    expect(zoomed.width).toBeCloseTo(unzoomed.width / 2, 0);
+    writeFileSync(`${output}/actual-zoom-metrics.json`, JSON.stringify({ unzoomed, zoomed, percent: 200 }, null, 2));
     for (const name of modules) {
       const editor = await openManagement(name, zoomPage);
       await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
