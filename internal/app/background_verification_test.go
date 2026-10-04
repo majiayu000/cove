@@ -380,6 +380,9 @@ func TestSpecBackgroundVerificationImmediateCompleteStillRetrievesAndDeadline(t 
 		pending, source, selectedModel, selectedKey := backgroundVerificationFixture(t, func(r *http.Request) (*http.Response, error) {
 			if r.Method == "POST" {
 				mutations.Add(1)
+				// Creation may consume the observation deadline. A known pending
+				// response must remain owned without requiring a GET after expiry.
+				time.Sleep(150 * time.Millisecond)
 			} else {
 				observations.Add(1)
 			}
@@ -388,8 +391,27 @@ func TestSpecBackgroundVerificationImmediateCompleteStillRetrievesAndDeadline(t 
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		kept, qualified, err := pending.verifyBackground(ctx, source, selectedModel, selectedKey)
-		if !errors.Is(err, context.DeadlineExceeded) || qualified || kept == nil || kept.Ended != nil || mutations.Load() != 1 || observations.Load() != 1 {
-			t.Fatal("deadline did not preserve one pending creation and stop polling")
+		if !errors.Is(err, context.DeadlineExceeded) || qualified || mutations.Load() > 1 || observations.Load() > mutations.Load() || (mutations.Load() == 1 && (kept == nil || kept.Ended != nil)) {
+			t.Fatalf("deadline state: err=%v qualified=%t kept=%t ended=%t creations=%d observations=%d", err, qualified, kept != nil, kept != nil && kept.Ended != nil, mutations.Load(), observations.Load())
+		}
+		backgroundVerificationAssertIdle(t, pending)
+	})
+	t.Run("cancel after first pending observation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var mutations, observations atomic.Int32
+		pending, source, selectedModel, selectedKey := backgroundVerificationFixture(t, func(r *http.Request) (*http.Response, error) {
+			if r.Method == "POST" {
+				mutations.Add(1)
+			} else {
+				observations.Add(1)
+				cancel()
+			}
+			return resourceResponse(`{"id":"resp-verification","status":"queued"}`), nil
+		})
+		kept, qualified, err := pending.verifyBackground(ctx, source, selectedModel, selectedKey)
+		if !errors.Is(err, context.Canceled) || qualified || kept == nil || kept.Ended != nil || mutations.Load() != 1 || observations.Load() != 1 {
+			t.Fatalf("cancellation state: err=%v qualified=%t kept=%t ended=%t creations=%d observations=%d", err, qualified, kept != nil, kept != nil && kept.Ended != nil, mutations.Load(), observations.Load())
 		}
 		backgroundVerificationAssertIdle(t, pending)
 	})
