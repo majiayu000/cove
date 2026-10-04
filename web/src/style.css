@@ -77,6 +77,7 @@ td small { display:block; }
 .sheet-heading h2,.modal>.section-title h2 { margin:0;font-size:14px;font-weight:600; }
 .modal>form { padding:16px;display:grid;gap:14px; }
 .management-sheet .panel { box-shadow:none; }
+.management-sheet code { overflow-wrap:anywhere; }
 .request-extra { padding:0 16px 20px; }
 .request-extra .request-links { display:flex; flex-wrap:wrap; gap:8px; }
 .request-extra p, .request-extra li, .request-extra code { overflow-wrap:anywhere; }

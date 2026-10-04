@@ -1,5 +1,5 @@
 import { chromium, expect } from "@playwright/test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
@@ -738,22 +738,190 @@ try {
   await expect(failedCatalog.getByRole("alert")).toHaveCount(0);
   await failedCatalog.getByRole("button", { name: "关闭管理", exact: true }).click();
 
+  const accountEditor = await openManagement("来源");
+  const accountPanel = accountEditor.locator("section").filter({ has: page.getByRole("heading", { name: "账号与凭据", exact: true }) });
+  await accountPanel.getByText("创建独立账号", { exact: true }).click();
+  await accountPanel.getByLabel("名称", { exact: true }).fill("GUI standalone account");
+  await accountPanel.getByRole("button", { name: "创建账号", exact: true }).click();
+  let accountCard = accountPanel.locator("article").filter({ has: page.getByRole("heading", { name: "GUI standalone account", exact: true }) });
+  await expect(accountCard).toBeVisible();
+  const guiAccount = (await api("accounts")).items.find(a => a.name === "GUI standalone account");
+  await accountCard.getByText("修改名称", { exact: true }).click();
+  await accountCard.getByLabel("账号名称", { exact: true }).fill("GUI renamed account");
+  await api(`accounts/${guiAccount.id}`, "PATCH", { version: guiAccount.version, name: "GUI concurrent account" });
+  await accountCard.getByRole("button", { name: "保存名称", exact: true }).click();
+  accountCard = accountPanel.locator("article").filter({ has: page.getByRole("heading", { name: "GUI concurrent account", exact: true }) });
+  await expect(accountCard.getByRole("region", { name: "账号名称版本冲突", exact: true })).toBeVisible();
+  await expect(accountCard.getByLabel("账号名称", { exact: true })).toHaveValue("GUI renamed account");
+  await accountCard.getByRole("button", { name: "使用当前版本，保留名称输入", exact: true }).click();
+  await accountCard.getByRole("button", { name: "保存名称", exact: true }).click();
+  accountCard = accountPanel.locator("article").filter({ has: page.getByRole("heading", { name: "GUI renamed account", exact: true }) });
+  await expect(accountCard).toBeVisible();
+  await accountCard.getByText("配置凭据", { exact: true }).click();
+  await accountCard.getByLabel("账号API凭据", { exact: true }).fill("isolated-account-fixture-only");
+  await accountCard.getByRole("button", { name: "保存凭据", exact: true }).click();
+  await expect(accountCard.getByText("替换凭据", { exact: true })).toBeVisible();
+  await expect(accountCard.getByLabel("账号API凭据", { exact: true })).toHaveValue("");
+  await accountCard.getByRole("button", { name: "删除未引用账号", exact: true }).click();
+  await expect(accountCard).toHaveCount(0);
+  await accountEditor.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  // Distinguish unreadable collections from actual empty collections, then recover.
+  const collectionCases = [
+    { name: "来源", paths: ["accounts"], retry: "重新读取账号", empty: "还没有账号。添加来源时会创建账号，也可以在下方单独创建。" },
+    { name: "工具", paths: ["clients"], retry: "重新检测版本", empty: "还没有客户端配置变更。应用成功后可在这里预览恢复。" },
+    { name: "工具", paths: ["client-changes"], retry: "重新检测版本", extraRetry: "重新读取扩展配置", empty: "还没有客户端配置变更。应用成功后可在这里预览恢复。" },
+    { name: "工具", paths: ["config-extensions"], retry: "重新读取扩展配置", empty: "还没有 MCP/Skills 配置变更。" },
+    { name: "预算", paths: ["budgets"], retry: "重新读取预算", empty: "还没有预算。你可以创建实例预算，也可以为某个 Key 或路由单独设置预算。" },
+    { name: "运维", paths: ["resource-status"], retry: "重新读取文件与任务", empty: "暂无后台或批处理任务。" },
+    { name: "运维", paths: ["alerts"], retry: "刷新提醒", empty: "当前没有已记录的提醒。" },
+  ];
+  for (const item of collectionCases) {
+    const failing = route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: `Isolated collection unavailable: ${item.paths.join(",")}` } }) });
+    for (const path of item.paths) await page.route(`**/admin/${path}`, failing);
+    let editor = await openManagement(item.name);
+    await expect(editor.getByRole("alert").filter({ hasText: "Isolated collection unavailable" }).first()).toBeVisible();
+    await expect(editor.getByText(item.empty, { exact: true })).toHaveCount(0);
+    for (const path of item.paths) await page.unroute(`**/admin/${path}`, failing);
+    await editor.getByRole("button", { name: item.retry, exact: true }).click();
+    if(item.extraRetry) await editor.getByRole("button", { name: item.extraRetry, exact: true }).click();
+    if (item.paths[0] === "alerts") await editor.getByRole("button", { name: "刷新提醒与投递记录", exact: true }).click();
+    await expect(editor.getByRole("alert").filter({ hasText: "Isolated collection unavailable" })).toHaveCount(0);
+    await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+    await expect(editor).not.toBeVisible();
+    // A successful empty result is a different state and has its own guidance.
+    const empty = route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(item.paths[0] === "resource-status" ? { resources: [], jobs: [] } : { items: [] }) });
+    for (const path of item.paths) await page.route(`**/admin/${path}`, empty);
+    editor = await openManagement(item.name);
+    await expect(editor.getByText(item.empty, { exact: true })).toBeVisible();
+    await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+    await expect(editor).not.toBeVisible();
+    for (const path of item.paths) await page.unroute(`**/admin/${path}`, empty);
+  }
+  // Dynamic client and MCP fields use the exact server field error and retain drafts.
+  const toolsBoundary = await openManagement("工具");
+  const clientPanel = toolsBoundary.locator("section").filter({ has: page.getByRole("heading", { name: "客户端配置", exact: true }) });
+  const fixtureRoot = realpathSync(mkdtempSync(resolve(tmpdir(), "cove-v13-client-")));
+  try {
+    await clientPanel.getByLabel("授权目录（绝对路径）", { exact: true }).fill(fixtureRoot);
+    await clientPanel.getByLabel("配置文件（绝对路径）", { exact: true }).fill(resolve(fixtureRoot, "config.toml"));
+    await clientPanel.getByLabel("公开模型 ID", { exact: true }).fill("coding");
+    const failClient = route => route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: { message: "Isolated client field failure", field: "explicit_path" } }) });
+    await page.route("**/admin/clients/codex/preview", failClient);
+    await clientPanel.getByRole("button", { name: "生成字段预览", exact: true }).click();
+    await expect(clientPanel.getByLabel("配置文件（绝对路径）", { exact: true })).toHaveAttribute("aria-invalid", "true");
+    await expect(clientPanel.getByLabel("配置文件（绝对路径）", { exact: true })).toHaveAttribute("aria-describedby", "client-config-error");
+    await expect(clientPanel.getByLabel("配置文件（绝对路径）", { exact: true })).toBeFocused();
+    await expect(clientPanel.getByLabel("公开模型 ID", { exact: true })).toHaveValue("coding");
+    await page.unroute("**/admin/clients/codex/preview", failClient);
+    const extensions = toolsBoundary.locator("section").filter({ has: page.getByRole("heading", { name: "MCP 与 Skills 配置", exact: true }) });
+    await extensions.getByLabel("授权目录（绝对路径）", { exact: true }).fill(fixtureRoot);
+    await extensions.getByLabel("名字", { exact: true }).fill("invalid/name");
+    await extensions.getByLabel("目标配置文件（绝对路径）", { exact: true }).fill(resolve(fixtureRoot, ".codex/mcp.toml"));
+    await extensions.getByLabel("Command", { exact: true }).fill("must-never-be-executed");
+    await extensions.getByRole("button", { name: "生成配置预览", exact: true }).click();
+    await expect(extensions.getByLabel("名字", { exact: true })).toHaveAttribute("aria-invalid", "true");
+    await expect(extensions.getByLabel("名字", { exact: true })).toHaveAttribute("aria-describedby", "config-extension-error");
+    await expect(extensions.getByLabel("名字", { exact: true })).toBeFocused();
+    await expect(extensions.getByLabel("Command", { exact: true })).toHaveValue("must-never-be-executed");
+    await extensions.getByLabel("内容", { exact: true }).selectOption("skills");
+    await extensions.getByLabel("客户端", { exact: true }).selectOption("claude");
+    await expect(extensions.getByLabel("配置卡版本", { exact: true })).toHaveValue("2.1.281");
+    await extensions.getByLabel("名字", { exact: true }).fill("browser-recovery");
+    const skillTarget = resolve(fixtureRoot,".claude/skills/browser-recovery");
+    const skillSource = resolve(fixtureRoot,"owned-source");
+    mkdirSync(resolve(skillSource,"scripts"),{recursive:true});
+    writeFileSync(resolve(skillSource,"SKILL.md"),"---\nname: browser-recovery\ndescription: isolated fixture\n---\nData only.\n");
+    writeFileSync(resolve(skillSource,"scripts/fixture.txt"),"Never executed.");
+    await extensions.getByLabel("目标技能目录（绝对路径）", { exact: true }).fill(skillTarget);
+    await extensions.getByLabel("明确选择的技能源目录（绝对路径）", { exact: true }).fill(skillSource);
+    await extensions.getByLabel("复制文件清单（每行一个相对路径）", { exact: true }).fill("SKILL.md\nscripts/fixture.txt");
+    const skillReplyPromise = page.waitForResponse(reply=>reply.url().endsWith("/admin/config-extensions/skills/preview") && reply.request().method()==="POST");
+    await extensions.getByRole("button", { name: "生成配置预览", exact: true }).click();
+    const skillReply = await skillReplyPromise;
+    const skillReplyData = await skillReply.json();
+    expect(skillReply.status(), JSON.stringify(skillReplyData.error)).toBe(200);
+    console.log("Skill preview status", JSON.stringify({status:skillReplyData.status,files:skillReplyData.files?.length}));
+    const applyConfig = toolsBoundary.getByRole("button", { name: "应用明确列出的文件", exact: true });
+    await expect(applyConfig).toBeEnabled();
+    // Real owned files are written; inject a failed completion response and verify the recovery entry.
+    const uncertainApply = async route => {
+      if(route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      const change = await response.json();
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "Isolated completion response failed; file progress retained" }, change }) });
+    };
+    await page.route("**/admin/client-changes", uncertainApply);
+    await applyConfig.click();
+    await expect(toolsBoundary.getByText("文件操作未全部完成。每份文件的进度已保留，请在扩展变更记录中预览恢复。", { exact: true })).toBeVisible();
+    const clientHistory = toolsBoundary.locator("section").filter({ has: page.getByRole("heading", { name: "扩展变更记录", exact: true }) });
+    await expect(clientHistory.getByRole("button", { name: "预览恢复", exact: true })).toBeVisible();
+    expect(readFileSync(resolve(skillTarget,"SKILL.md"),"utf8")).toContain("browser-recovery");
+    await page.unroute("**/admin/client-changes", uncertainApply);
+    await clientHistory.getByRole("button", { name: "预览恢复", exact: true }).click();
+    await toolsBoundary.getByRole("button", { name: "按所选处理恢复", exact: true }).click();
+    await expect(clientHistory.getByText("skills · 已恢复", { exact: true })).toBeVisible();
+    await confirmDraft(() => toolsBoundary.getByRole("button", { name: "关闭管理", exact: true }).click(), true);
+  } finally { rmSync(fixtureRoot, { recursive: true, force: true }); }
+
+  const notificationBoundary = await openManagement("运维");
+  const notificationPanel = notificationBoundary.locator("#notifications");
+  await notificationPanel.getByLabel("HTTPS webhook URL", { exact: true }).fill("http://127.0.0.1/never-send");
+  await notificationPanel.getByRole("button", { name: "保存通知设置", exact: true }).click();
+  await expect(notificationPanel.getByLabel("HTTPS webhook URL", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await expect(notificationPanel.getByLabel("HTTPS webhook URL", { exact: true })).toHaveAttribute("aria-describedby", "notification-save-error");
+  await expect(notificationPanel.getByLabel("HTTPS webhook URL", { exact: true })).toBeFocused();
+  await expect(notificationPanel.getByLabel("HTTPS webhook URL", { exact: true })).toHaveValue("http://127.0.0.1/never-send");
+  await confirmDraft(() => notificationBoundary.getByRole("button", { name: "关闭管理", exact: true }).click(), true);
+
   // Expanded forms and native-modal keyboard focus, across all ten management modules.
   const modules = ["来源", "模型", "路由", "API Keys", "工具", "请求", "用量", "预算", "运维", "设置"];
   for (const name of modules) {
     console.log(`Checking expanded management: ${name}`);
     const editor = await openManagement(name);
-    await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
     await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count()).toBe(0);
+    await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
     const unlabeled = await editor.evaluate(element => [...element.querySelectorAll('input:not([type="hidden"]),select,textarea')].filter(input => !input.labels?.length && !input.getAttribute("aria-label") && !input.getAttribute("aria-labelledby")).map(input => input.name || input.tagName));
     expect(unlabeled, `${name} expanded controls need labels`).toEqual([]);
     for (const width of [375, 768, 1280]) {
       await page.setViewportSize({ width, height: 900 });
-      expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth), `${name} dialog overflow at ${width}`).toBe(false);
+      const overflow = await editor.evaluate(element => element.scrollWidth > element.clientWidth);
+      if (overflow) {
+        console.log("Expanded dialog overflow", JSON.stringify({ name, width, elements: await editor.evaluate(element => { const edge = element.getBoundingClientRect().right; return [...element.querySelectorAll("*")].filter(control => control.getBoundingClientRect().right > edge).slice(0, 12).map(control => control.outerHTML.slice(0, 250)); }) }));
+        await page.screenshot({ path: `${output}/expanded-overflow.png`, fullPage: true });
+      }
+      expect(overflow, `${name} dialog overflow at ${width}`).toBe(false);
     }
-    await page.keyboard.press("Tab");
-    expect(await editor.evaluate(element => element.contains(document.activeElement)), `${name} modal keeps keyboard focus`).toBe(true);
+    const keyboardTargets = await editor.evaluate(element => {
+      const controls = [...element.querySelectorAll('button,input,select,textarea,summary,a[href],[tabindex]')].filter(control => control.tabIndex >= 0 && !control.matches(":disabled") && control.getClientRects().length && getComputedStyle(control).visibility !== "hidden" && (control.type !== "radio" || control.checked));
+      controls.forEach((control, index) => control.setAttribute("data-keyboard-check", String(index)));
+      controls[0]?.focus();
+      return controls.length;
+    });
+    const visited = new Set();
+    // Native date/time inputs can require several Tabs within one DOM control.
+    for (let step = 0; step <= keyboardTargets * 3 + 3 && visited.size < keyboardTargets; step++) {
+      const focus = await editor.evaluate(element => ({ inside: element.contains(document.activeElement), index: document.activeElement?.getAttribute("data-keyboard-check"), tag: document.activeElement?.tagName, html: document.activeElement?.outerHTML.slice(0,160) }));
+      if(!focus.inside) console.log("Native keyboard boundary", JSON.stringify({ name, step, tag: focus.tag, html: focus.html }));
+      expect(focus.inside || focus.tag === "BODY", `${name} full keyboard traversal never reaches underlying application controls`).toBe(true);
+      if (focus.index !== null) visited.add(focus.index);
+      await page.keyboard.press("Tab");
+    }
+    if (visited.size !== keyboardTargets) {
+      console.log("Unvisited keyboard controls", JSON.stringify(await editor.evaluate((element, seen) => [...element.querySelectorAll('[data-keyboard-check]')].filter(control => !seen.includes(control.getAttribute("data-keyboard-check"))).map(control => ({ index: control.getAttribute("data-keyboard-check"), html: control.outerHTML.slice(0, 300), disabled: control.matches(":disabled"), visible: !!control.getClientRects().length, inert: !!control.closest("[inert]") })), [...visited])));
+    }
+    expect(visited.size, `${name} all visible controls reachable by keyboard`).toBe(keyboardTargets);
+    const reverseVisited = new Set();
+    for (let step = 0; step <= keyboardTargets * 3 + 3 && reverseVisited.size < keyboardTargets; step++) {
+      await page.keyboard.press("Shift+Tab");
+      const focus = await editor.evaluate(element => ({ inside: element.contains(document.activeElement), index: document.activeElement?.getAttribute("data-keyboard-check"), tag: document.activeElement?.tagName }));
+      expect(focus.inside || focus.tag === "BODY", `${name} reverse traversal never reaches underlying application controls`).toBe(true);
+      if (focus.index !== null) reverseVisited.add(focus.index);
+    }
+    expect(reverseVisited.size, `${name} all visible controls reachable in reverse order`).toBe(keyboardTargets);
     await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+    await expect(editor).not.toBeVisible();
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 
@@ -773,9 +941,11 @@ try {
     writeFileSync(`${output}/actual-zoom-metrics.json`, JSON.stringify({ unzoomed, zoomed, percent: 200 }, null, 2));
     for (const name of modules) {
       const editor = await openManagement(name, zoomPage);
+      await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count()).toBe(0);
       await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
       expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth), `${name} overflow at actual 200% zoom`).toBe(false);
       await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+    await expect(editor).not.toBeVisible();
     }
     await zoomPage.screenshot({ path: `${output}/actual-200-percent-zoom.png`, fullPage: true });
   } finally {
@@ -805,7 +975,7 @@ try {
   }
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/deep-link/recovery/pagination/stale-filter, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, manual reconciliation, budget CRUD and explicit CAS resolution, local doctor and redacted download, management audit filter/pagination/download, GUI model and route CRUD/CAS/network errors, dirty-close cancel/discard and credential clearing, expanded ten-module labels and 375/768/1280 geometry, actual Chrome 200% zoom, persisted subscription scheduling, coding preview, real synthetic two-attempt safe dial failover, targeted model/route recovery, account occupancy, management access, mobile overflow, no page errors.",
+    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/deep-link/recovery/pagination/stale-filter, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, manual reconciliation, budget CRUD and explicit CAS resolution, local doctor and redacted download, management audit filter/pagination/download, GUI model and route CRUD/CAS/network errors, dirty-close cancel/discard and credential clearing, collection load failures/empty states/recovery, dynamic client/MCP field errors and retained drafts, expanded ten-module labels/full forward and reverse keyboard traversal and 375/768/1280 geometry, actual Chrome 200% zoom, persisted subscription scheduling, coding preview, real synthetic two-attempt safe dial failover, targeted model/route recovery, account occupancy, management access, mobile overflow, no page errors.",
   );
 } finally {
   await context.close();

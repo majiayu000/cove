@@ -139,3 +139,27 @@ func assertClientScriptNotExecutable(t *testing.T, path string) {
 		t.Fatal("copied script grants native execute permission")
 	}
 }
+
+// A real Windows handle permits preflight reads and denies atomic replacement.
+func blockClientFileReplacement(t *testing.T, path string) func() {
+	t.Helper()
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			if err := windows.CloseHandle(handle); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(release)
+	return release
+}

@@ -43,7 +43,7 @@ type clientCard struct {
 func clientCards() []clientCard {
 	home, _ := os.UserHomeDir()
 	return []clientCard{
-		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted"},
+		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0 production-generated config and isolated two-round tool loop verified"},
 		{Kind: "claude", Name: "Claude Code", ContractVersion: "2.1.281", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".claude", "settings.json")}, "project": {"<项目>/.claude/settings.local.json"}}, Evidence: "Cove v1.2 external contracts 5.2; code.claude.com/docs/en/settings and llm-gateway"},
 		{Kind: "opencode", Name: "OpenCode", ContractVersion: "1.18.33", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".config", "opencode", "opencode.json")}, "project": {"<项目>/opencode.json", "<项目>/opencode.jsonc"}}, Evidence: "Cove v1.2; sst/opencode 7945de208964a49300d7f770d1a71d078db9a4c4; 1.18.27 isolated debug config --pure parser accepted"},
 	}
@@ -73,7 +73,7 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 	card.Version = strings.TrimSpace(out.String())
 	version := strings.TrimPrefix(card.Version, "codex-cli ")
 	version = strings.TrimSuffix(version, " (Claude Code)")
-	valid := version == card.ContractVersion || card.Kind == "codex" && version == "0.156.1" || card.Kind == "opencode" && version == "1.18.27"
+	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0") || card.Kind == "opencode" && version == "1.18.27"
 	if valid {
 		card.Status = "installed"
 	} else {

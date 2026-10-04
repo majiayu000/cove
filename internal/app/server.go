@@ -335,7 +335,7 @@ func (a *App) adminDispatch(w http.ResponseWriter, r *http.Request) {
 		a.pricesAPI(w, r)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/admin/config-extensions/") {
+	if r.URL.Path == "/admin/config-extensions" || strings.HasPrefix(r.URL.Path, "/admin/config-extensions/") {
 		a.configExtensionsAPI(w, r)
 		return
 	}

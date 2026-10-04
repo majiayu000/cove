@@ -15,6 +15,8 @@ export function NotificationSettings({ api }: { api: API }) {
   const [pending, setPending] = useState<string[]>([]), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [conflict,setConflict]=useState<Settings|null>(null), [field,setField]=useState("");
   const [actionErrors,setActionErrors]=useState<Record<string,string>>({});
+  const [recordsLoading,setRecordsLoading]=useState(true),[alertsRead,setAlertsRead]=useState(false),[deliveriesRead,setDeliveriesRead]=useState(false);
+  const panel=useRef<HTMLElement>(null);
   const active=useRef(true), running=useRef(new Set<string>()), dirty=useRef(false), settingsSequence=useRef(0), recordSequence=useRef(0);
   const [sampleVisible, setSampleVisible] = useState(false), [confirmed, setConfirmed] = useState(false);
   const busy = pending.includes("save") || pending.includes("sample");
@@ -23,16 +25,21 @@ export function NotificationSettings({ api }: { api: API }) {
     const v=await api<{settings:Settings;credential_configured:boolean;event_kinds:string[]}>("notifications");
     if(!active.current||sequence!==settingsSequence.current)return;
     setSaved(v.settings);setCredential(v.credential_configured);setKinds(v.event_kinds);setSampleVisible(false);setConfirmed(false);
+    setError("");
     if(!dirty.current)setForm(v.settings);
   }
   async function refresh() {
     const sequence=++recordSequence.current;
+    setRecordsLoading(true);
     const replies=await Promise.allSettled([api<{items:Alert[]}>("alerts"),api<{items:Delivery[]}>("notifications/deliveries")]);
     if(!active.current||sequence!==recordSequence.current)return;
+    setRecordsLoading(false);
+    setAlertsRead(replies[0].status==="fulfilled");setDeliveriesRead(replies[1].status==="fulfilled");
     if(replies[0].status==="fulfilled")setAlerts(replies[0].value.items);
     if(replies[1].status==="fulfilled")setDeliveries(replies[1].value.items);
     const failures=replies.filter((reply):reply is PromiseRejectedResult=>reply.status==="rejected");
     if(failures.length)throw new Error(failures.map(reply=>reply.reason?.message||"提醒记录读取失败").join("；"));
+    setActionErrors(old=>({...old,refresh:""}));
   }
   async function run(action:string,task:()=>Promise<void>,button:HTMLButtonElement) {
     if(running.current.has(action)||["save","sample"].includes(action)&&(running.current.has("save")||running.current.has("sample")))return;
@@ -46,7 +53,7 @@ export function NotificationSettings({ api }: { api: API }) {
         if(failure.status===409){settingsSequence.current++;try{const latest=await api<{settings:Settings;credential_configured:boolean}>("notifications");if(active.current){setSaved(latest.settings);setCredential(latest.credential_configured);setConflict(latest.settings);setSampleVisible(false);setConfirmed(false);}}
           catch(readError){if(active.current)setActionErrors(old=>({...old,save:`${failure.message}；当前版本读取失败：${(readError as Error).message}。输入已保留，可再次提交以读取差异。`}));}}
       }
-    }finally{running.current.delete(action);if(active.current){setPending([...running.current]);window.requestAnimationFrame(()=>{if(active.current&&button.isConnected&&!button.disabled)button.focus();});}}
+    }finally{running.current.delete(action);if(active.current){setPending([...running.current]);window.requestAnimationFrame(()=>{if(!active.current)return;const invalid=action==="save"?panel.current?.querySelector<HTMLElement>('[aria-invalid="true"]'):null;if(invalid)invalid.focus();else if(button.isConnected&&!button.disabled)button.focus();});}}
   }
   useEffect(()=>{
     active.current=true;
@@ -58,13 +65,14 @@ export function NotificationSettings({ api }: { api: API }) {
   function change(value:Partial<Settings>){dirty.current=true;setForm(current=>current&&({...current,...value}));setSampleVisible(false);setConfirmed(false);}
   function changeCredential(){dirty.current=true;setSampleVisible(false);setConfirmed(false);}
   const settingsDiff=(value:Settings)=>({version:value.version,enabled:value.enabled,url:value.url,signature:value.signature,event_kinds:value.event_kinds});
-  return <section className="panel" id="notifications" data-dirty={dirty.current}>
+  return <section ref={panel} className="panel" id="notifications" data-dirty={dirty.current}>
     <div className="section-title"><h2>提醒与通知</h2><button disabled={pending.includes("settings-refresh")} onClick={e=>void run("settings-refresh",loadSettings,e.currentTarget)}>刷新通知设置</button></div>
     <p>提醒在本机按状态持续观测并记录恢复。额度未知时保留未知；已读不会解除故障。外部 webhook 默认关闭，启用后只发送所选类型的脱敏状态变化。</p>
     {error && <p className="error" role="alert">{error}</p>}{Object.entries(actionErrors).map(([action,message])=>message&&<p key={action} id={`notification-${action}-error`} className="error" role="alert">{message}</p>)}{notice && <p className="notice" role="status">{notice}</p>}
     {conflict&&form&&<div role="region" aria-label="通知版本冲突"><p>本地编辑版本 {form.version}；当前版本 {conflict.version}。凭据输入仅保留在此页面内存。</p><pre>{JSON.stringify({local:settingsDiff(form),current:settingsDiff(conflict)},null,2)}</pre><button disabled={busy} onClick={()=>{setForm({...form,version:conflict.version});setConflict(null);setField("");setActionErrors(old=>({...old,save:""}));}}>使用当前版本，保留通知输入</button><button disabled={busy} onClick={()=>{dirty.current=false;setForm(conflict);setConflict(null);setSecret("");setAuthorization("");setClear(false);setField("");setActionErrors(old=>({...old,save:""}));setSampleVisible(false);setConfirmed(false);}}>放弃通知修改</button></div>}
     <div id="alerts">
-      {alerts.length === 0 && <p>暂无已记录的提醒。</p>}
+      {recordsLoading&&<p role="status">正在读取提醒与投递记录…</p>}
+      {!recordsLoading && alertsRead && alerts.length === 0 && <p>暂无已记录的提醒。</p>}
       {alerts.map(alert => <div className="tool-row" key={alert.id}><div><strong>{alert.summary}</strong><span>{alert.state === "resolved" ? "已恢复" : alert.state === "dismissed" ? "已读，故障仍待处理" : "待处理"} · {alert.count} 次观测{alert.resolved_at && ` · ${new Date(alert.resolved_at).toLocaleString()}`}</span></div>
         {alert.state === "active" && <button disabled={pending.includes(`dismiss:${alert.id}`)} onClick={e => run(`dismiss:${alert.id}`, async () => { await api(`alerts/${alert.id}/dismiss`, "POST", { version: alert.version }); await refresh(); },e.currentTarget)}>标为已读</button>}
       </div>)}
@@ -74,7 +82,7 @@ export function NotificationSettings({ api }: { api: API }) {
       <label>HTTPS webhook URL<input type="url" autoComplete="off" value={form.url} aria-invalid={field==="url"||undefined} aria-describedby={field==="url"?"notification-save-error":undefined} disabled={busy} placeholder="https://notifications.example.test/hook" onChange={e => change({ url: e.target.value })}/></label>
       <p>URL 不接受账号、查询串或内部网络地址。请求直接连接校验后的地址，不跟随重定向。</p>
       <label><input type="checkbox" checked={form.signature} disabled={busy} onChange={e => change({ signature: e.target.checked })}/>使用 HMAC-SHA256 签名</label>
-      <label>签名凭据<input type="password" autoComplete="new-password" value={secret} aria-describedby={field==="secret"?"notification-save-error":undefined} disabled={busy || clear} placeholder={credential ? "留空保留已保存凭据" : "输入签名凭据"} onChange={e => {changeCredential();setSecret(e.target.value);}}/></label>
+      <label>签名凭据<input type="password" autoComplete="new-password" value={secret} aria-invalid={field==="secret"||undefined} aria-describedby={field==="secret"?"notification-save-error":undefined} disabled={busy || clear} placeholder={credential ? "留空保留已保存凭据" : "输入签名凭据"} onChange={e => {changeCredential();setSecret(e.target.value);}}/></label>
       <label>Authorization header（可选）<input type="password" autoComplete="new-password" value={authorization} disabled={busy || clear} placeholder="留空保留已保存 header" onChange={e => {changeCredential();setAuthorization(e.target.value);}}/></label>
       <label><input type="checkbox" checked={clear} disabled={busy} onChange={e => {changeCredential();setClear(e.target.checked);}}/>清除已保存的通知凭据与 header</label>
       <fieldset disabled={busy} aria-describedby={field==="event_kinds"?"notification-save-error":undefined}><legend>发送这些提醒的发生与恢复</legend>{kinds.map(kind => <label key={kind}><input type="checkbox" checked={form.event_kinds.includes(kind)} onChange={e => change({ event_kinds: e.target.checked ? [...form.event_kinds, kind] : form.event_kinds.filter(k => k !== kind) })}/>{names[kind] || kind}</label>)}</fieldset>
@@ -97,6 +105,7 @@ export function NotificationSettings({ api }: { api: API }) {
     </div>}
     <p>待发队列最多 256 条，每事件最多 3 次尝试，24 小时到期；投递失败只影响通知。</p>
     <button disabled={pending.includes("refresh")} onClick={e => run("refresh", refresh,e.currentTarget)}>刷新提醒与投递记录</button>
+    {!recordsLoading&&deliveriesRead&&!deliveries.length&&<p>暂无通知投递记录。</p>}
     {deliveries.map(item => <p key={item.event_id}>{deliveryNames[item.state] || item.state} · {item.attempt_count}/3 次 · {new Date(item.created_at).toLocaleString()}{item.error?.code && ` · ${item.error.code}`}</p>)}
   </section>;
 }

@@ -17,6 +17,7 @@ function download(data: Blob | unknown, name: string, type = "application/json")
 export function OperationsConsole({ api, status }: Props) {
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [pending, setPending] = useState<string[]>([]);
   const [operation, setOperation] = useState<Operation | null>(null), [alerts, setAlerts] = useState<any[]>([]), [doctor, setDoctor] = useState<any>(null);
+  const [alertsLoading,setAlertsLoading]=useState(true), [alertsError,setAlertsError]=useState("");
   const [restoreFile, setRestoreFile] = useState<File | null>(null), [target, setTarget] = useState(""), [restorePreview, setRestorePreview] = useState<any>(null), [restoreAcknowledged, setRestoreAcknowledged] = useState(false);
   const [configFile, setConfigFile] = useState<File | null>(null), [configPreview, setConfigPreview] = useState<any>(null), [transferMode,setTransferMode]=useState("create"),[resolutions,setResolutions]=useState<Record<string,any>>({});
   const [preparedRestore,setPreparedRestore]=useState<any>(null);
@@ -39,7 +40,12 @@ export function OperationsConsole({ api, status }: Props) {
     running.current.add(name);setPending([...running.current]);setError("");setNotice("");
     try { await action(); } catch (e) {if(mounted.current)setError((e as Error).message)} finally {running.current.delete(name);if(mounted.current)setPending([...running.current])}
   }
-  async function loadAlerts() { const revision=++alertRevision.current,value=await api("alerts");if(mounted.current&&revision===alertRevision.current)setAlerts(value.items); }
+  async function loadAlerts() {
+    const revision=++alertRevision.current;setAlertsLoading(true);
+    try{const value=await api("alerts");if(mounted.current&&revision===alertRevision.current){setAlerts(value.items);setAlertsError("")}}
+    catch(error){if(mounted.current&&revision===alertRevision.current)setAlertsError((error as Error).message)}
+    finally{if(mounted.current&&revision===alertRevision.current)setAlertsLoading(false)}
+  }
   function remember(value: Operation, selection:number) { if(!mounted.current||selection!==operationSelection.current)return;setOperation(value);try{sessionStorage.setItem("cove:last-local-operation",value.id)}catch{} }
   useEffect(() => {
     let live = true;
@@ -55,8 +61,9 @@ export function OperationsConsole({ api, status }: Props) {
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status">{notice}</p>}
     <section className="panel"><h2>本机运行与提醒</h2>
       <p>活动请求 {status?.active_requests ?? "待读取"} · 存储 {status?.storage_healthy === false ? "故障" : status?.storage_healthy === true ? "正常" : "待读取"}。提醒保存在本机，可在上方单独开启外部通知。</p>
-      <button disabled={pending.includes("alerts")} onClick={() => run("alerts", loadAlerts)}>刷新提醒</button>
-      {!alerts.length && <p>当前没有已记录的提醒。</p>}
+      <button disabled={alertsLoading || pending.includes("alerts")} onClick={() => run("alerts", loadAlerts)}>刷新提醒</button>
+      {alertsLoading&&<p role="status">正在读取运行提醒…</p>}{alertsError&&<p className="error" role="alert">{alertsError}</p>}
+      {!alertsLoading && !alertsError && !alerts.length && <p>当前没有已记录的提醒。</p>}
       {alerts.map((alert) => <div className="tool-row" key={alert.id}><div><strong>{alert.summary}</strong><span>{alert.state === "resolved" ? "已恢复" : alert.state === "dismissed" ? "已读，故障状态仍保留" : "待处理"} · {alert.count} 次观测</span></div>
         {alert.state === "active" && <button disabled={pending.includes(alert.id)} onClick={() => run(alert.id, async () => { await api(`alerts/${alert.id}/dismiss`, "POST", { version: alert.version }); await loadAlerts(); })}>标为已读</button>}
       </div>)}

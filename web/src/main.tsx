@@ -150,7 +150,7 @@ async function api<T = any>(
   const v = await r.json();
   if (!r.ok) {
     if (r.status === 401) window.dispatchEvent(new Event("gatt-signed-out"));
-    throw Object.assign(new Error(v.error?.message || `请求失败 ${r.status}`), { status: r.status, field: v.error?.field, requestId: v.request_id });
+    throw Object.assign(new Error(v.error?.message || `请求失败 ${r.status}`), { status: r.status, field: v.error?.field, requestId: v.request_id, change: v.change });
   }
   return v;
 }

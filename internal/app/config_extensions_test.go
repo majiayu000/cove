@@ -272,6 +272,31 @@ func TestSpecConfigExtensionsMCPThreeWay(t *testing.T) {
 		t.Fatal("keep_current modified named entry")
 	}
 }
+func TestSpecConfigExtensionsHTTPManagementEntry(t *testing.T) {
+	f := clientFixture(t)
+	response, body := f.request("GET", "/admin/config-extensions", "", false)
+	if response.StatusCode != 401 {
+		t.Fatalf("anonymous extension cards: %d", response.StatusCode)
+	}
+	response, body = f.request("GET", "/admin/config-extensions", "", true)
+	var cards struct {
+		Items []extensionCard `json:"items"`
+	}
+	if response.StatusCode != 200 || json.Unmarshal(body, &cards) != nil || len(cards.Items) != len(extensionCards()) {
+		t.Fatalf("HTTP extension cards not wired: %d %s", response.StatusCode, body)
+	}
+	response, _ = f.request("POST", "/admin/config-extensions", "{}", true)
+	if response.StatusCode != 405 {
+		t.Fatalf("extension cards method contract: %d", response.StatusCode)
+	}
+	in, _ := extensionMCPInput(t, "codex", "stdio")
+	response, body = f.request("POST", "/admin/config-extensions/mcp/preview", encode(in), true)
+	var preview clientPreview
+	if response.StatusCode != 200 || json.Unmarshal(body, &preview) != nil || preview.Status != "ready" {
+		t.Fatalf("HTTP extension preview not wired: %d %s", response.StatusCode, body)
+	}
+}
+
 func TestSpecConfigExtensionsSkillsOwnership(t *testing.T) {
 	f := clientFixture(t)
 	root := clientRoot(t)
@@ -303,6 +328,91 @@ func TestSpecConfigExtensionsSkillsOwnership(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(path, "scripts", "tool.sh")); !os.IsNotExist(err) {
 		t.Fatal("unmodified owned script not withdrawn")
+	}
+}
+
+func TestSpecConfigExtensionsNativePartialWriteAndResumedRestore(t *testing.T) {
+	f := clientFixture(t)
+	root, source := clientRoot(t), clientRoot(t)
+	path := filepath.Join(root, ".claude", "skills", "partial-fixture")
+	skill := "---\nname: partial-fixture\ndescription: native filesystem failure\n---\nData only.\n"
+	second := filepath.Join(path, "scripts", "fixture.txt")
+	writeClient(t, filepath.Join(source, "SKILL.md"), skill)
+	writeClient(t, filepath.Join(source, "scripts", "fixture.txt"), "new second file")
+	writeClient(t, filepath.Join(path, "SKILL.md"), "original first file")
+	writeClient(t, second, "original second file")
+	in := extensionInput{Client: "claude", ClientVersion: "2.1.281", Scope: "project", Root: root, Path: path, Name: "partial-fixture", SourceRoot: source, Files: []string{"SKILL.md", "scripts/fixture.txt"}}
+	preview := extensionPreviewFor(t, f.a, "skills", in)
+	hashes := map[string]string{}
+	for _, file := range preview.Files {
+		hashes[file.Path] = file.BaseHash
+	}
+	unblock := blockClientFileReplacement(t, second)
+	status, body := extensionRequest(t, f.a, "/admin/client-changes", clientApplyInput{PreviewID: preview.ID, BaseHashes: hashes, SecretDelivery: "env_reference"})
+	var failed struct {
+		Change clientChange `json:"change"`
+	}
+	if err := json.Unmarshal(body, &failed); err != nil {
+		t.Fatal(err)
+	}
+	change := failed.Change
+	if status != 503 || change.State != "partial" || change.ID == "" || change.Files[0]["status"] != "applied" || change.Files[1]["status"] != "failed" {
+		t.Fatalf("native second-file failure must preserve partial progress: %d %s", status, body)
+	}
+	if string(readClient(t, filepath.Join(path, "SKILL.md"))) != skill || string(readClient(t, second)) != "original second file" {
+		t.Fatal("partial failure hid or rolled back completed writes")
+	}
+	var stored clientChange
+	var raw string
+	if err := f.a.Store.DB.QueryRow("SELECT data FROM client_changes WHERE id=?", change.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil || stored.State != "partial" {
+		t.Fatal("partial progress was not durable", err)
+	}
+	if status, _ := extensionRequest(t, f.a, "/admin/client-changes", clientApplyInput{PreviewID: preview.ID, BaseHashes: hashes, SecretDelivery: "env_reference"}); status != 409 {
+		t.Fatal("partially applied preview could be replayed")
+	}
+	unblock()
+	restore := extensionRestorePreviewFor(t, f.a, change)
+	if restore.Status == "conflict" {
+		t.Fatal("unchanged failed file became a user conflict")
+	}
+	extensionRestoreFor(t, f.a, change, restore, nil)
+	if string(readClient(t, filepath.Join(path, "SKILL.md"))) != "original first file" || string(readClient(t, second)) != "original second file" {
+		t.Fatal("partial change did not restore both original files")
+	}
+	if len(extensionRestorePreviewFor(t, f.a, change).Files) != 0 {
+		t.Fatal("completed restoration still offered processed files")
+	}
+
+	// A second attempt completes; restoration then fails on the second file.
+	change = extensionApplyFor(t, f.a, extensionPreviewFor(t, f.a, "skills", in), "env_reference")
+	restore = extensionRestorePreviewFor(t, f.a, change)
+	currentHashes := map[string]string{}
+	for _, file := range restore.Files {
+		currentHashes[file.Path] = file.CurrentHash
+	}
+	unblock = blockClientFileReplacement(t, second)
+	status, body = extensionRequest(t, f.a, "/admin/client-changes/"+change.ID+"/restore", extensionRestoreInput{CurrentHashes: currentHashes})
+	if err := json.Unmarshal(body, &failed); err != nil {
+		t.Fatal(err)
+	}
+	if status != 503 || failed.Change.State != "partial" || len(failed.Change.RestoredFields) != 1 {
+		t.Fatalf("restore failure lost durable first-file progress: %d %s", status, body)
+	}
+	if string(readClient(t, filepath.Join(path, "SKILL.md"))) != "original first file" || string(readClient(t, second)) != "new second file" {
+		t.Fatal("restore failure did not preserve exact per-file state")
+	}
+	unblock()
+	writeClient(t, filepath.Join(path, "SKILL.md"), "user edit after first-file restoration")
+	restore = extensionRestorePreviewFor(t, f.a, change)
+	if len(restore.Files) != 1 || restore.Files[0].Path != second {
+		t.Fatal("resumed restoration reprocessed completed file")
+	}
+	extensionRestoreFor(t, f.a, change, restore, nil)
+	if string(readClient(t, second)) != "original second file" || string(readClient(t, filepath.Join(path, "SKILL.md"))) != "user edit after first-file restoration" {
+		t.Fatal("resumed restoration changed user content or failed to restore remaining file")
 	}
 }
 func TestSpecConfigExtensionsSkillsMatrixAndBoundaries(t *testing.T) {

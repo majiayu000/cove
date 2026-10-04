@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
 import time
-from urllib.request import build_opener, ProxyHandler
+from urllib.request import build_opener, ProxyHandler, Request
 
 ROOT = Path(__file__).resolve().parent.parent
 HTTP = build_opener(ProxyHandler({}))
@@ -65,6 +66,17 @@ def main():
             time.sleep(.25)
         raise AssertionError('Native manager did not reach expected state')
 
+    def management(path, method='GET', body=None, session=None):
+        base = f'http://{config["listen"]}'
+        headers = {'Origin': base}
+        if session:
+            headers['Authorization'] = 'Bearer ' + session
+        content = None if body is None else json.dumps(body).encode()
+        if content is not None:
+            headers['Content-Type'] = 'application/json'
+        with HTTP.open(Request(base + '/admin/' + path, data=content, method=method, headers=headers), timeout=3) as response:
+            return json.load(response)
+
     try:
         initial = status()
         assert not initial['registered'] and not initial['running']
@@ -96,6 +108,22 @@ def main():
         second = await_state(True)
         assert second['instance']['pid'] != first['instance']['pid']
         result['checks']['restart_new_pid_same_build'] = second['instance']['build_id'] == result['build_id']
+        # Terminate only the PID proven to belong to this temporary service.
+        assert second['verified'] and second['instance']['data_dir'] == str(data)
+        session = management('session', 'POST', {})['session_token']
+        account = management('accounts', 'POST', {'provider': 'local', 'auth_type': 'none', 'name': 'native-crash-fixture'}, session)
+        management('session', 'DELETE', session=session)
+        before_crash = hashlib.sha256((data / 'secrets/credentials.json').read_bytes()).hexdigest()
+        os.kill(second['instance']['pid'], signal.SIGKILL)
+        await_state(False)
+        command('service', 'start')
+        recovered = await_state(True)
+        result['checks']['forced_process_exit_then_native_start_recovers'] = recovered['instance']['pid'] != second['instance']['pid'] and recovered['instance']['build_id'] == result['build_id']
+        result['checks']['crash_recovery_preserves_credentials_and_database'] = before_crash == hashlib.sha256((data / 'secrets/credentials.json').read_bytes()).hexdigest() and (data / 'gatt.db').exists()
+        session = management('session', 'POST', {})['session_token']
+        persisted = management('accounts/' + account['id'], session=session)
+        management('session', 'DELETE', session=session)
+        result['checks']['crash_recovery_preserves_persisted_account'] = all(persisted[field] == account[field] for field in ('id', 'name', 'provider', 'auth_type', 'version'))
         command('service', 'uninstall')
         uninstalled = True
         assert not registration.exists() and not await_state(False)['registered']

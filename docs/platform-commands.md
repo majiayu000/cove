@@ -44,6 +44,19 @@ prepare 检查完整包 hash、路径安全、文件闭包、平台、源快照�
 
 只有新实例被确认仍关闭准入、尚未产生新的请求事实且 schema 相同，失败流程才恢复旧 binary 与一致数据快照并重新核验。激活不确定或 schema 改变时保留恢复证据并拒绝自动覆盖。`update rollback --journal FILE` 只适用于低层替换完成前的安全阶段，不能用来覆盖激活后的新账务。
 
+## macOS 签名与公证候选包
+
+从当前源码原生构建后，可以运行下面的发行准备工具。证书名称或 SHA-1 仅用于选择已安装的 Developer ID Application 身份；公证凭据留在现有钥匙串 profile 中。
+
+```sh
+make build
+python3 scripts/package-signed-macos.py --identity 'Developer ID Application certificate name' --notary-profile 'Existing Keychain profile name'
+```
+
+工具复用开发包的源码与产物核验，只签名临时副本，更新副本中的二进制 hash 与构建证据，再创建并签名 DMG。只有 Apple 返回 Accepted、公证票据附加及校验成功、Gatekeeper 检查通过后，才输出 `bin/cove-signed-darwin-ARCH-SOURCE.dmg`、SHA-256 和 verification.json。失败保留公证结果报告；没有自动发布。将 DMG 内容复制到选定的本机目录后再运行 `Cove.command`，避免把服务注册到临时挂载卷。
+
+命令依据 [Apple 自定义公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)。目前此工具只完成语法、参数与本地工具接口核对；实际签名和公证仍需可用的签名身份及 profile，不能把脚本存在算作正式发行已通过。Windows 签名证书及原生签名分发另行待验。
+
 ## 构建与验收
 
 ```sh

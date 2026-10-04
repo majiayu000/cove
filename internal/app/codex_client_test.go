@@ -170,30 +170,33 @@ func TestCodexCLIToolLoop(t *testing.T) {
 	if err = os.Mkdir(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	config := fmt.Sprintf(`model_provider = "gatt"
-model = "gpt-5.6-luna"
-web_search = "disabled"
+	config := `web_search = "disabled"
 model_context_window = 128000
 model_auto_compact_token_limit = 120000
 cli_auth_credentials_store = "ephemeral"
 [features]
 apply_patch_freeform = false
-[model_providers.gatt]
-name = "Gatt fixture"
-base_url = %q
-env_key = "GATT_TEST_CLIENT_KEY"
-wire_api = "responses"
+[model_providers.cove]
 supports_websockets = false
 request_max_retries = 0
 stream_max_retries = 0
-`, f.server.URL+"/v1")
-	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+`
+	configPath := filepath.Join(home, "config.toml")
+	document, err := parseClientDocument("codex", configPath, []byte(config), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := document.edit(clientDesiredFields("codex", "gpt-5.6-luna", f.server.URL), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(configPath, generated, 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--cd", dir, "Run the provided synthetic printf tool and report its result.")
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "CODEX_HOME=" + home, "GATT_TEST_CLIENT_KEY=" + f.key, "NO_COLOR=1"}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "CODEX_HOME=" + home, "COVE_API_KEY=" + f.key, "NO_COLOR=1"}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Codex client failed: %v\n%s", err, redact(string(output), f.key))

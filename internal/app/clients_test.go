@@ -54,6 +54,23 @@ func clientRoot(t *testing.T) string {
 	}
 	return root
 }
+
+func TestSpecClientConfigVerifiedCodex0160(t *testing.T) {
+	f := clientFixture(t)
+	bin := t.TempDir()
+	installClientVersionFixture(t, bin, "codex", "codex-cli 0.160.0")
+	t.Setenv("PATH", bin)
+	root := clientRoot(t)
+	path := filepath.Join(root, "config.toml")
+	preview := clientPreviewFor(t, f.a, "codex", "user", root, path)
+	if preview.Status != "ready" || preview.Version != "codex-cli 0.160.0" {
+		t.Fatal("verified current CLI was blocked", preview)
+	}
+	change := clientApply(t, f.a, preview)
+	if change.State != "applied" || !strings.Contains(string(readClient(t, path)), "model_provider") {
+		t.Fatal("current client configuration was not applied")
+	}
+}
 func clientPreviewFor(t *testing.T, a *App, kind, scope, root, path string) clientPreview {
 	t.Helper()
 	status, b := clientRequest(t, a, "/admin/clients/"+kind+"/preview", clientConfigInput{Scope: scope, Root: root, Path: path, Model: "coding"})
