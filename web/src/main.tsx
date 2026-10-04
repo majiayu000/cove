@@ -181,6 +181,7 @@ function App() {
     [ready, setReady] = useState(false),
     [page, setPage] = useState(() => {try{return localStorage.getItem("cove.ui.page") || "概览"}catch{return "概览"}}),
     [error, setError] = useState(""),
+    [errorField, setErrorField] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
   const [sources, setSources] = useState<Source[]>([]),
@@ -248,6 +249,22 @@ function App() {
   const [management, setManagement] = useState<{page:string;id?:string}|null>(null);
   const managementDialog = useRef<HTMLDialogElement>(null);
   const sourceDialog=useRef<HTMLDialogElement>(null);
+  const sourceDirty = useRef(false);
+  function hasManagementDraft() { return !!managementDialog.current?.querySelector('[data-dirty="true"]'); }
+  function closeManagement() {
+    if(hasManagementDraft() && !window.confirm("有未保存的输入。关闭会丢弃这些输入，是否关闭？"))return;
+    setFreshKey("");setManagement(null);
+  }
+  function closeSource() {
+    if(sourceDirty.current && !window.confirm("来源有未保存的输入。关闭会丢弃这些输入，是否关闭？"))return;
+    sourceDirty.current=false;
+    setEditing(null);setSourceConflict(null);setSourceConflictReadError("");setError("");setErrorField("");
+    setForm({name:"",kind:"api_key",native_protocol:"responses",provider:"openai_compatible",account_id:"",proxy_url:null,cloud_config:{},allow_parameter_adjustment:false,base_url:"",models:"",credential:""});setShowAdd(false);
+  }
+  useEffect(()=>{
+    const warn=(event:BeforeUnloadEvent)=>{if(sourceDialog.current?.open && sourceDirty.current || managementDialog.current?.open && hasManagementDraft()){event.preventDefault();event.returnValue=""}};
+    window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);
+  },[]);
   useEffect(() => {try{localStorage.setItem("cove.ui.page",page)}catch{/* Navigation remains available for this session. */}},[page]);
   useEffect(() => {
     const dialog = managementDialog.current;
@@ -310,11 +327,15 @@ function App() {
     runningActions.current.add(id);
     if(actionID)setPendingActions([...runningActions.current]);else setBusy(true);
     setError("");
+    setErrorField("");
     setNotice("");
     try {
       await fn();
     } catch (e) {
       setError((e as Error).message);
+      const field=(e as Error&{field?:string}).field||"";
+      setErrorField(field);
+      if(sourceDialog.current?.open && field)window.requestAnimationFrame(()=>sourceDialog.current?.querySelector<HTMLElement>(`[name="${CSS.escape(field)}"]`)?.focus());
     } finally {
       runningActions.current.delete(id);
       if(actionID)setPendingActions([...runningActions.current]);else setBusy(false);
@@ -431,7 +452,7 @@ function App() {
       }
       throw error;
     }
-    setShowAdd(false);
+    sourceDirty.current=false;setShowAdd(false);
     setEditing(null);
     setSourceConflict(null);setSourceConflictReadError("");
     setForm({
@@ -449,6 +470,7 @@ function App() {
     setNotice(form.kind === "codex_subscription" ? "来源已添加。点击「登录 ChatGPT」完成账号授权，再到模型页读取可用模型。" : "来源已保存，完成测试后才会显示已验证。");
   }
   function edit(s: Source) {
+    sourceDirty.current=false;setErrorField("");
     setSourceConflict(null);setSourceConflictReadError("");
     setEditing(s);
     setForm({
@@ -511,6 +533,7 @@ function App() {
         onPage={next=>{setPage(next);setError("");setNotice("");closeDetail()}}
         onManage={(next,id)=>{setFreshKey("");setManagement({page:next,id})}}
         onAdd={preset=>{
+          sourceDirty.current=false;setErrorField("");
           const defaults:Partial<Record<string,{kind:string;provider:string;native_protocol:string;base_url:string}>> = {
             codex:{kind:"codex_subscription",provider:"codex",native_protocol:"responses",base_url:""},
             openai:{kind:"api_key",provider:"openai",native_protocol:"responses",base_url:"https://api.openai.com/v1"},
@@ -532,8 +555,8 @@ function App() {
         {notice && <div className="notice" role="status">{notice}</div>}
         {status.maintenance_error && <div className="error" role="alert">{status.maintenance_error}</div>}
       </div>}
-      <dialog ref={managementDialog} className="management-sheet" aria-label={`${operationPage}管理`} onCancel={()=>{setFreshKey("");setManagement(null)}}>
-      <div className="sheet-heading"><h2>{operationPage === "工具" ? "客户端配置" : operationPage === "API Keys" && !management?.id ? "创建 Key" : `${operationPage}管理`}</h2><button className="icon-button" aria-label="关闭管理" onClick={()=>{setFreshKey("");setManagement(null)}}><span data-i="">close</span></button></div>
+      <dialog ref={managementDialog} className="management-sheet" aria-label={`${operationPage}管理`} onChangeCapture={event=>{const form=(event.target as HTMLElement).closest("form");if(form&&!form.hasAttribute("data-draft-ignore"))form.dataset.dirty="true"}} onCancel={event=>{event.preventDefault();closeManagement()}}>
+      <div className="sheet-heading"><h2>{operationPage === "工具" ? "客户端配置" : operationPage === "API Keys" && !management?.id ? "创建 Key" : `${operationPage}管理`}</h2><button className="icon-button" aria-label="关闭管理" onClick={closeManagement}><span data-i="">close</span></button></div>
       {management && <div className="workspace" data-operation-page={operationPage} data-selection={management.id || "create"}>
         {error && (
           <div className="error" role="alert">
@@ -979,7 +1002,7 @@ function App() {
                           {routes.map(route=><option value={"route:"+route.id} key={route.id}>路由 · {route.name}</option>)}
                         </select>
                         <details className="key-policy"><summary>权限、限额与轮换</summary>
-                          <form key={keyEdit?.formVersion??k.version} onChange={()=>setKeyEdits(old=>old[k.id]?old:{...old,[k.id]:{version:k.version,formVersion:k.version,base:k}})} onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget),edit=keyEdit??{version:k.version,formVersion:k.version,base:k};runKey(async()=>{
+                          <form data-dirty={!!keyEdit} key={keyEdit?.formVersion??k.version} onChange={()=>setKeyEdits(old=>old[k.id]?old:{...old,[k.id]:{version:k.version,formVersion:k.version,base:k}})} onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget),edit=keyEdit??{version:k.version,formVersion:k.version,base:k};runKey(async()=>{
                             try{await api(`client-keys/${k.id}`,"PATCH",{version:edit.version,...keyPolicyInput(f)})}
                             catch(error){
                               setKeyEdits(old=>({...old,[k.id]:edit}));
@@ -1001,7 +1024,7 @@ function App() {
                             </div>}
                             {keyEdit?.readError&&<p role="alert" className="error">{keyEdit.readError}；权限输入已保留。</p>}
                           </form>
-                          <form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);runKey(async()=>{const date=String(f.get("revoke_at")||"");const result=await api(`client-keys/${k.id}/rotate`,"POST",{version:k.version,revoke_at:date?new Date(date).toISOString():null});setFreshKey(result.secret);setGuideKey(result.key);await refresh()})}}>
+                          <form onSubmit={e=>{e.preventDefault();const element=e.currentTarget,f=new FormData(element);runKey(async()=>{const date=String(f.get("revoke_at")||"");const result=await api(`client-keys/${k.id}/rotate`,"POST",{version:k.version,revoke_at:date?new Date(date).toISOString():null});element.reset();element.dataset.dirty="false";setFreshKey(result.secret);setGuideKey(result.key);await refresh()})}}>
                             <label>旧 Key 计划失效时间<input name="revoke_at" type="datetime-local"/></label><p>留空时旧 Key 保持有效，验证新 Key 后再明确撤销。新旧 Key 共用原有专属预算，轮换保留已用额和未释放预留。</p><button disabled={keyBusy}>创建轮换 Key</button>
                           </form>
                         </details>
@@ -1120,7 +1143,7 @@ function App() {
                 ))}
               </select>
             </div>
-            <form key={requestQuery} className="inline-form request-filters" onSubmit={(e) => {
+            <form data-draft-ignore key={requestQuery} className="inline-form request-filters" onSubmit={(e) => {
               e.preventDefault();
               const data = new FormData(e.currentTarget), query = new URLSearchParams();
               for (const name of ["source_id", "client_key_id", "origin", "from", "to"]) {
@@ -1295,6 +1318,7 @@ function App() {
                 不重复叠加；金额按币种分别累计，使用请求发生时的价格快照。来源原生额度目前保持未知。
               </p>
               <form
+                data-draft-ignore
                 className="inline-form"
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -1362,7 +1386,7 @@ function App() {
               </dl>
               <form
                 className="inline-form"
-                onInput={()=>beginSettingsEdit("retention")}
+                data-dirty={!!settingsEdits.retention} onInput={()=>beginSettingsEdit("retention")}
                 onSubmit={(e) => {
                   e.preventDefault();
                   const days=Number(new FormData(e.currentTarget).get("days"));
@@ -1390,7 +1414,7 @@ function App() {
                 将不能继续经此网关续接。
               </p>
             </section>
-            <section className="panel"><h2>新请求的运行限制</h2><form onInput={()=>beginSettingsEdit("limits")} onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void run(()=>saveSettingsEdit("limits",{max_concurrent:Number(f.get("max_concurrent")),idle_timeout_seconds:Number(f.get("idle")),total_timeout_seconds:Number(f.get("total"))}),"settings-limits")}}><label>全局并发<input name="max_concurrent" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.max_concurrent} key={settingsEdits.limits?.formVersion??settings.version}/></label><label>流空闲超时（秒）<input name="idle" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.idle_timeout_seconds} key={"idle"+(settingsEdits.limits?.formVersion??settings.version)}/></label><label>请求总超时（秒）<input name="total" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.total_timeout_seconds} key={"total"+(settingsEdits.limits?.formVersion??settings.version)}/></label><button disabled={pendingActions.includes("settings-limits")}>保存运行限制</button></form>{settingsEdits.limits&&(settingsEdits.limits.version!==settings.version||settingsEdits.limits.readError)&&<div role="region" aria-label="运行限制版本冲突"><p>本地输入已保留。原并发 {settingsEdits.limits.base.limits?.max_concurrent}、空闲/总超时 {settingsEdits.limits.base.limits?.idle_timeout_seconds}/{settingsEdits.limits.base.limits?.total_timeout_seconds}；当前并发 {settings.limits?.max_concurrent}、空闲/总超时 {settings.limits?.idle_timeout_seconds}/{settings.limits?.total_timeout_seconds}。</p>{settingsEdits.limits.readError&&<p role="alert">{settingsEdits.limits.readError}</p>}<button disabled={pendingActions.includes("settings-limits")||!!settingsEdits.limits.readError} onClick={()=>setSettingsEdits(old=>({...old,limits:{...old.limits!,version:settings.version,base:settings}}))}>使用当前版本，保留运行限制输入</button><button disabled={pendingActions.includes("settings-limits")} onClick={()=>setSettingsEdits(old=>{const next={...old};delete next.limits;return next})}>放弃运行限制修改</button></div>}<p>待重启设置：{JSON.stringify(settings.restart_required||{})}</p></section>
+            <section className="panel"><h2>新请求的运行限制</h2><form data-dirty={!!settingsEdits.limits} onInput={()=>beginSettingsEdit("limits")} onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void run(()=>saveSettingsEdit("limits",{max_concurrent:Number(f.get("max_concurrent")),idle_timeout_seconds:Number(f.get("idle")),total_timeout_seconds:Number(f.get("total"))}),"settings-limits")}}><label>全局并发<input name="max_concurrent" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.max_concurrent} key={settingsEdits.limits?.formVersion??settings.version}/></label><label>流空闲超时（秒）<input name="idle" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.idle_timeout_seconds} key={"idle"+(settingsEdits.limits?.formVersion??settings.version)}/></label><label>请求总超时（秒）<input name="total" type="number" min="1" disabled={pendingActions.includes("settings-limits")} defaultValue={settings.limits?.total_timeout_seconds} key={"total"+(settingsEdits.limits?.formVersion??settings.version)}/></label><button disabled={pendingActions.includes("settings-limits")}>保存运行限制</button></form>{settingsEdits.limits&&(settingsEdits.limits.version!==settings.version||settingsEdits.limits.readError)&&<div role="region" aria-label="运行限制版本冲突"><p>本地输入已保留。原并发 {settingsEdits.limits.base.limits?.max_concurrent}、空闲/总超时 {settingsEdits.limits.base.limits?.idle_timeout_seconds}/{settingsEdits.limits.base.limits?.total_timeout_seconds}；当前并发 {settings.limits?.max_concurrent}、空闲/总超时 {settings.limits?.idle_timeout_seconds}/{settings.limits?.total_timeout_seconds}。</p>{settingsEdits.limits.readError&&<p role="alert">{settingsEdits.limits.readError}</p>}<button disabled={pendingActions.includes("settings-limits")||!!settingsEdits.limits.readError} onClick={()=>setSettingsEdits(old=>({...old,limits:{...old.limits!,version:settings.version,base:settings}}))}>使用当前版本，保留运行限制输入</button><button disabled={pendingActions.includes("settings-limits")} onClick={()=>setSettingsEdits(old=>{const next={...old};delete next.limits;return next})}>放弃运行限制修改</button></div>}<p>待重启设置：{JSON.stringify(settings.restart_required||{})}</p></section>
             <section className="panel">
               <h2>诊断与备份</h2>
               <p>
@@ -1432,15 +1456,17 @@ function App() {
             ref={sourceDialog}
             className="modal"
             aria-label="来源编辑"
-            onCancel={()=>setShowAdd(false)}
+            onCancel={event=>{event.preventDefault();closeSource()}}
           >
             <div className="section-title">
               <h2>{editing ? "编辑来源" : "添加模型来源"}</h2>
-              <button className="text" onClick={() => setShowAdd(false)}>
+              <button className="text" onClick={closeSource}>
                 关闭 ×
               </button>
             </div>
             <form
+              onChangeCapture={()=>{sourceDirty.current=true}}
+              aria-describedby={error?"source-form-error":undefined}
               onSubmit={(e) => {
                 e.preventDefault();
                 run(saveSource);
@@ -1450,6 +1476,7 @@ function App() {
                 来源名称
                 <input
                   value={form.name}
+                  name="name"
                   required
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="给它起个容易识别的名字"
@@ -1459,6 +1486,7 @@ function App() {
                 认证方式
                 <select
                   disabled={!!editing}
+                  name="kind"
                   value={form.kind}
                   onChange={(e) => {const kind=e.target.value;setForm({...form,kind,provider:kind==="none"?"local":kind==="aws_profile"?"bedrock":kind==="google_adc"||kind==="service_account"?"vertex":"openai_compatible",native_protocol:kind==="google_adc"||kind==="service_account"?"gemini":"responses",cloud_config:kind==="google_adc"?{vertex_credentials_mode:"adc"}:kind==="service_account"?{vertex_credentials_mode:"service_account"}:{}})}}
                 >
@@ -1470,12 +1498,15 @@ function App() {
               </label>
               {form.kind !== "codex_subscription" && (
                 <>
-                  <label>原生协议<select value={form.native_protocol} onChange={(e) => setForm({ ...form, native_protocol: e.target.value })}><option value="responses">Responses</option><option value="chat_completions">Chat Completions</option><option value="messages">Messages</option><option value="gemini">Gemini 原生</option><option value="realtime_websocket">Realtime WebSocket</option></select></label><label>Provider<input value={form.provider} onChange={e=>setForm({...form,provider:e.target.value})}/></label>
+                  <label>原生协议<select name="native_protocol" value={form.native_protocol} onChange={(e) => setForm({ ...form, native_protocol: e.target.value })}><option value="responses">Responses</option><option value="chat_completions">Chat Completions</option><option value="messages">Messages</option><option value="gemini">Gemini 原生</option><option value="realtime_websocket">Realtime WebSocket</option></select></label><label>Provider<input name="provider" value={form.provider} onChange={e=>setForm({...form,provider:e.target.value})}/></label>
                   <CloudProviderSettings provider={form.provider} value={form.cloud_config} onChange={cloud_config=>setForm({...form,cloud_config})}/>
                   {!["bedrock","vertex"].includes(form.provider)&&<label>
                     API 基础地址
                     <input
                       type="url"
+                      name="base_url"
+                      aria-invalid={errorField==="base_url"||undefined}
+                      aria-describedby={errorField==="base_url"?"source-form-error":undefined}
                       required
                       value={form.base_url}
                       onChange={(e) =>
@@ -1489,6 +1520,7 @@ function App() {
                     {form.kind==="service_account"?"服务账号 JSON（私有凭据保存）":editing ? "替换凭据（留空保留当前凭据）" : "来源 API Key"}
                     <input
                       type="password"
+                      name="credential"
                       value={form.credential}
                       autoComplete="new-password"
                       onChange={(e) =>
@@ -1499,13 +1531,14 @@ function App() {
                 </>
               )}
               {form.kind === "codex_subscription" && <label><input type="checkbox" checked={form.allow_parameter_adjustment} onChange={(e) => setForm({ ...form, allow_parameter_adjustment: e.target.checked })}/>启用订阅兼容调用（Chat/Messages 的输出 token 上限不会强制执行）</label>}
-              <label>复用账号 ID（可选）<input value={form.account_id} onChange={e=>setForm({...form,account_id:e.target.value})} placeholder="从账号卡复制；留空创建独立账号"/></label>
+              <label>复用账号 ID（可选）<input name="account_id" value={form.account_id} onChange={e=>setForm({...form,account_id:e.target.value})} placeholder="从账号卡复制；留空创建独立账号"/></label>
               <label>网络代理<select value={form.proxy_url===null?"inherit":form.proxy_url===""?"direct":"custom"} onChange={e=>setForm({...form,proxy_url:e.target.value==="inherit"?null:e.target.value==="direct"?"":"http://127.0.0.1:"})}><option value="inherit">继承进程环境</option><option value="direct">直连</option><option value="custom">指定代理</option></select></label>
-              <label>代理 URL<input value={form.proxy_url||""} onChange={e=>setForm({...form,proxy_url:e.target.value})} placeholder="http:// 或 socks5://（无凭据）"/></label>
+              <label>代理 URL<input name="proxy_url" value={form.proxy_url||""} onChange={e=>setForm({...form,proxy_url:e.target.value})} placeholder="http:// 或 socks5://（无凭据）"/></label>
               <label>
                 模型标识
                 <input
                   value={form.models}
+                  name="models"
                   onChange={(e) => setForm({ ...form, models: e.target.value })}
                   placeholder="实际模型 ID，多个用英文逗号分隔"
                 />
@@ -1515,7 +1548,7 @@ function App() {
                 凭据保存在 Cove 私有目录。更换地址或凭据会使旧会话绑定失效；跨站更换地址必须提供新目标凭据。
               </p>
               {editing&&(sourceConflict||sourceConflictReadError)&&<div role="region" aria-label="来源版本冲突"><p>本地输入已保留。原版本 {editing.version}；当前版本 {sourceConflict?.version??"未读取"}。</p>{sourceConflict&&<><p>原名称 {editing.name}；当前名称 {sourceConflict.name}。</p><p>原地址 {editing.base_url}；当前地址 {sourceConflict.base_url}。</p><p>原模型 {editing.models.join(", ")}；当前模型 {sourceConflict.models.join(", ")}。</p><pre>{JSON.stringify({原配置:{kind:editing.kind,provider:editing.provider,native_protocol:editing.native_protocol,account_id:editing.account_id,proxy_url:editing.proxy_url,cloud_config:editing.cloud_config,allow_parameter_adjustment:editing.allow_parameter_adjustment},当前配置:{kind:sourceConflict.kind,provider:sourceConflict.provider,native_protocol:sourceConflict.native_protocol,account_id:sourceConflict.account_id,proxy_url:sourceConflict.proxy_url,cloud_config:sourceConflict.cloud_config,allow_parameter_adjustment:sourceConflict.allow_parameter_adjustment}},null,2)}</pre><p>当前凭据：{sourceConflict.credential_configured?"已配置":"未配置"}；绑定代次 {sourceConflict.binding_generation}。凭据内容不进入差异。</p></>}{sourceConflictReadError&&<p role="alert">{sourceConflictReadError}</p>}<button type="button" disabled={busy||!sourceConflict||!!sourceConflictReadError} onClick={()=>{setEditing(sourceConflict);setSourceConflict(null)}}>使用当前版本，保留来源输入</button><button type="button" disabled={busy||!sourceConflict||!!sourceConflictReadError} onClick={()=>{if(sourceConflict)edit(sourceConflict)}}>放弃来源修改</button>{sourceConflictReadError&&<button type="button" disabled={busy} onClick={()=>void run(async()=>{const latest=await api<Source>(`sources/${editing.id}`);setSourceConflict(latest);setSourceConflictReadError("")})}>重新读取当前来源</button>}</div>}
-              {error && <div className="error" role="alert">{error}</div>}
+              {error && <div id="source-form-error" className="error" role="alert">{error}</div>}
               <button disabled={busy}>{busy ? "正在保存…" : "保存来源"}</button>
             </form>
           </dialog>

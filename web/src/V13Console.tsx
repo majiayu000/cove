@@ -241,6 +241,7 @@ export function V13Console(p: Props) {
   }, [mode, lang]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if(document.querySelector("dialog[open]"))return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((v) => !v);

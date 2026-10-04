@@ -10,13 +10,14 @@ export function FullBackupControls({ create }: { create: (input: BackupInput) =>
   const [error, setError] = useState('')
   const submitting=useRef(false)
   const encrypted = mode === 'full' || encryptMetadata
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const form=event.currentTarget
     if(submitting.current)return
     if (encrypted && (!passphrase || passphrase !== confirmation)) { setError('请输入口令，并确认两次输入一致。'); return }
     const input: BackupInput = { mode, encrypt: encrypted, ...(encrypted ? { passphrase } : {}) }
     submitting.current=true;setBusy(true); setError(''); setPassphrase(''); setConfirmation('')
-    try { await create(input) } catch (e) { setError(e instanceof Error ? e.message : '备份未完成，请查看操作状态。') } finally { submitting.current=false;setBusy(false) }
+    try { await create(input);form.dataset.dirty="false" } catch (e) { setError(e instanceof Error ? e.message : '备份未完成，请查看操作状态。') } finally { submitting.current=false;setBusy(false) }
   }
   return <form onSubmit={submit}>
     <label>备份内容<select value={mode} onChange={e => setMode(e.target.value as 'metadata' | 'full')} disabled={busy}>

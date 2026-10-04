@@ -3,13 +3,98 @@ package app
 import (
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// Audit exposes only action metadata, never the replay response or request hash.
+func (a *App) auditAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		fail(w, 405, "方法不支持", "")
+		return
+	}
+	limit := 50
+	if value := r.URL.Query().Get("limit"); value != "" {
+		var err error
+		limit, err = strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 100 {
+			fail(w, 422, "每页数量须为1到100", "limit")
+			return
+		}
+	}
+	type cursor struct {
+		At time.Time `json:"at"`
+		ID string    `json:"id"`
+	}
+	query := "SELECT data FROM operations WHERE json_extract(data,'$.kind')='admin_action'"
+	args := []any{}
+	if state := r.URL.Query().Get("state"); state != "" {
+		query += " AND json_extract(data,'$.state')=?"
+		args = append(args, state)
+	}
+	if value := r.URL.Query().Get("cursor"); value != "" {
+		var c cursor
+		data, err := base64.RawURLEncoding.DecodeString(value)
+		if err != nil || json.Unmarshal(data, &c) != nil || c.At.IsZero() || c.ID == "" {
+			fail(w, 422, "审计游标无效，请刷新列表", "cursor")
+			return
+		}
+		query += " AND (julianday(json_extract(data,'$.created_at'))<julianday(?) OR (julianday(json_extract(data,'$.created_at'))=julianday(?) AND id<?))"
+		at := c.At.Format(time.RFC3339Nano)
+		args = append(args, at, at, c.ID)
+	}
+	query += " ORDER BY julianday(json_extract(data,'$.created_at')) DESC,id DESC LIMIT ?"
+	args = append(args, limit+1)
+	rows, err := a.Store.DB.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		fail(w, 503, storageError().Error(), "")
+		return
+	}
+	defer rows.Close()
+	type entry struct {
+		ID         string    `json:"id"`
+		CreatedAt  time.Time `json:"created_at"`
+		UpdatedAt  time.Time `json:"updated_at"`
+		Method     string    `json:"method"`
+		Path       string    `json:"path"`
+		EntityID   string    `json:"entity_id,omitempty"`
+		State      string    `json:"state"`
+		HTTPStatus int       `json:"http_status"`
+	}
+	items := []entry{}
+	for rows.Next() {
+		var raw string
+		var saved struct {
+			Operation
+			Result actionResult `json:"result"`
+		}
+		if rows.Scan(&raw) != nil || json.Unmarshal([]byte(raw), &saved) != nil {
+			fail(w, 503, storageError().Error(), "")
+			return
+		}
+		method, path, _ := strings.Cut(saved.Result.Path, " ")
+		path, _, _ = strings.Cut(path, "?")
+		items = append(items, entry{saved.ID, saved.CreatedAt, saved.UpdatedAt, method, path, saved.Result.EntityID, saved.State, saved.Result.Status})
+	}
+	if rows.Err() != nil {
+		fail(w, 503, storageError().Error(), "")
+		return
+	}
+	var next *string
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		value := base64.RawURLEncoding.EncodeToString([]byte(encode(cursor{last.CreatedAt, last.ID})))
+		next = &value
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+}
 
 type actionResult struct {
 	Path      string          `json:"path"`

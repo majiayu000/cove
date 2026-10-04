@@ -5,6 +5,7 @@ type APIOptions = { responseType?: "blob"; contentType?: string; headers?:Record
 type API = <T = any>(path: string, method?: string, body?: unknown, options?: APIOptions) => Promise<T>;
 type Props = { api: API; status?: Record<string, any> };
 type Operation = { id: string; kind: string; state: string; version: number; error?: string; result?: { artifact_id?: string; expires_at?: string; summary?: any; filename?:string } };
+type Audit = { id: string; created_at: string; updated_at: string; method: string; path: string; entity_id?: string; state: string; http_status: number };
 
 function download(data: Blob | unknown, name: string, type = "application/json") {
   const blob = data instanceof Blob ? data : new Blob([JSON.stringify(data, null, 2)], { type });
@@ -21,6 +22,18 @@ export function OperationsConsole({ api, status }: Props) {
   const [preparedRestore,setPreparedRestore]=useState<any>(null);
   const mounted = useRef(true), transferRevision = useRef(0), alertRevision=useRef(0), operationSelection=useRef(0), running=useRef(new Set<string>());
   const [from, setFrom] = useState(""), [to, setTo] = useState("");
+  const [audit, setAudit] = useState<Audit[]>([]), [auditFilter, setAuditFilter] = useState(""), [auditCursor, setAuditCursor] = useState<string|null>(null), [auditLoading, setAuditLoading] = useState(true), [auditError, setAuditError] = useState("");
+  const auditRevision = useRef(0), configInput = useRef<HTMLInputElement>(null);
+  async function loadAudit() {
+    const revision = ++auditRevision.current;
+    setAuditLoading(true); setAuditError("");
+    try {
+      const value = await api(`audit?limit=20&state=${encodeURIComponent(auditFilter)}`);
+      if(mounted.current && revision === auditRevision.current) { setAudit(value.items); setAuditCursor(value.next_cursor); }
+    } catch(e) { if(mounted.current && revision === auditRevision.current) setAuditError((e as Error).message); }
+    finally { if(mounted.current && revision === auditRevision.current) setAuditLoading(false); }
+  }
+  useEffect(() => { void loadAudit(); return () => { auditRevision.current++; }; }, [api, auditFilter]);
   async function run(name: string, action: () => Promise<void>) {
     if(running.current.has(name))return;
     running.current.add(name);setPending([...running.current]);setError("");setNotice("");
@@ -50,6 +63,17 @@ export function OperationsConsole({ api, status }: Props) {
       <button disabled={pending.includes("doctor")} onClick={() => run("doctor", async () => { const value=await api("doctor");if(mounted.current)setDoctor(value); })}>运行本机诊断</button>
       {doctor && <div role="status">{doctor.checks.map((check: any) => <p key={check.kind}>{check.kind} · {check.healthy === false ? "需要处理" : check.healthy === true ? "可用" : check.status} · {check.message}</p>)}<button onClick={() => download(doctor, "cove-doctor.json")}>下载脱敏诊断</button></div>}
     </section>
+    <section className="panel" aria-label="管理审计">
+      <h2>管理审计</h2><p>管理请求的时间、目标与结果保留90天。已接受的异步操作须另行确认最终结果。未确认的结果保持待确认；下载不包含请求体、返回内容或凭据。</p>
+      <label>操作结果<select aria-label="审计操作结果" value={auditFilter} onChange={e=>setAuditFilter(e.target.value)}><option value="">全部</option><option value="succeeded">请求成功</option><option value="failed">失败</option><option value="running">结果待确认</option></select></label>
+      <button disabled={auditLoading} onClick={()=>void loadAudit()}>刷新审计</button>
+      <button disabled={auditLoading || !audit.length} onClick={()=>download({items:audit,scope:"当前已加载的管理动作",timezone:"UTC"},"cove-audit.json")}>下载当前审计记录</button>
+      {auditLoading && <p role="status">正在读取审计记录…</p>}
+      {auditError && <p className="error" role="alert">{auditError}；已有记录保留，请重试。</p>}
+      {!auditLoading && !auditError && !audit.length && <p>{auditFilter ? "当前筛选没有匹配的管理动作。" : "尚无已登记的管理动作，使用管理页修改配置后会显示在这里。"}{auditFilter && <button onClick={()=>setAuditFilter("")}>清空审计筛选</button>}</p>}
+      {!!audit.length && <div className="table-scroll"><table><thead><tr><th>时间（本机时区）</th><th>操作与目标</th><th>请求结果</th></tr></thead><tbody>{audit.map(item=><tr key={item.id}><td>{new Date(item.created_at).toLocaleString()}</td><td><code>{item.method} {item.path}</code>{item.entity_id && <p><code>{item.entity_id}</code></p>}</td><td>{item.state==="succeeded"?(item.http_status===202?"已接受":"成功"):item.state==="failed"?"失败":"结果待确认"} · HTTP {item.http_status || "未知"}</td></tr>)}</tbody></table></div>}
+      {auditCursor && <button disabled={auditLoading || pending.includes("audit-more")} onClick={()=>run("audit-more",async()=>{const revision=auditRevision.current,value=await api(`audit?limit=20&state=${encodeURIComponent(auditFilter)}&cursor=${encodeURIComponent(auditCursor)}`);if(mounted.current&&revision===auditRevision.current){setAudit(old=>{const ids=new Set(old.map(v=>v.id));return [...old,...value.items.filter((v:Audit)=>!ids.has(v.id))]});setAuditCursor(value.next_cursor)}})}>加载更多审计</button>}
+    </section>
     <section className="panel"><h2>元数据备份</h2><p>保留来源、模型、路由和报表；移除账号凭据、可用 Key、资源续接、客户端配置快照和请求正文。恢复后需要重新登录并创建新 Key。</p>
       <FullBackupControls create={async input=>{const selection=++operationSelection.current,value=await api("backups","POST",input);remember(value,selection)}}/>
       <p>完整备份采用 age 口令加密；元数据备份不包含凭据。下载文件仅保留 24 小时，并要求当前管理会话。</p>
@@ -61,7 +85,7 @@ export function OperationsConsole({ api, status }: Props) {
       </div>}
     </section>
     <section className="panel"><h2>恢复到全新目录</h2><p>先上传备份并核对数量、版本与缺失凭据。此操作准备一个新目录，当前服务继续使用原目录；切换启动需由你另行执行。</p>
-      <EncryptedRestoreControls disabled={pending.includes("restore-apply")} preview={async(file,target,passphrase)=>{const value=await api(`restore-preview?target_dir=${encodeURIComponent(target)}`,"POST",file,{contentType:file.name.endsWith(".age")?"application/age":"application/x-tar",headers:passphrase?{"X-Cove-Backup-Passphrase":passphrase}:{}});if(mounted.current){setRestorePreview(value);setRestoreAcknowledged(false)}}}/>
+      <EncryptedRestoreControls key={preparedRestore?.target_dir || "new-restore"} disabled={pending.includes("restore-apply")} preview={async(file,target,passphrase)=>{const value=await api(`restore-preview?target_dir=${encodeURIComponent(target)}`,"POST",file,{contentType:file.name.endsWith(".age")?"application/age":"application/x-tar",headers:passphrase?{"X-Cove-Backup-Passphrase":passphrase}:{}});if(mounted.current){setRestorePreview(value);setRestoreAcknowledged(false)}}}/>
 
       {restorePreview && <div><p>目标 {restorePreview.target_dir}</p><p>格式 v{restorePreview.manifest.format_version} · schema v{restorePreview.manifest.schema_version} · 凭据 {restorePreview.manifest.secret_included ? "包含" : "不包含"}</p>
         <p>来源 {restorePreview.counts.sources} · 账号 {restorePreview.counts.accounts} · 模型 {restorePreview.counts.source_models} · 历史 Key {restorePreview.counts.client_keys} · 请求 {restorePreview.counts.requests}</p>
@@ -70,10 +94,10 @@ export function OperationsConsole({ api, status }: Props) {
       </div>}
     </section>
     {preparedRestore && <section className="panel" role="status"><h2>恢复目录已准备</h2><p>目标 <code>{preparedRestore.target_dir}</code>；配置 <code>{preparedRestore.target_dir}/config.json</code>。</p><p>用当前 <code>-config</code> 与 <code>-data-dir</code> 执行 <code>restore init --pointer FILE</code>，将返回 hash 用于 <code>restore prepare --pointer FILE --journal FILE --target-config TARGET/config.json --target-data-dir TARGET --expected-pointer-hash HASH</code>，再执行 <code>restore apply --journal FILE</code>。</p><p>FILE 使用私有绝对路径；启动器会排空旧实例、核验目标就绪后激活。具体命令见平台文档。</p></section>}
-    <section className="panel"><h2>配置搬运</h2><p>搬运来源、模型、路由、别名、预算、价格与运行设置。凭据、可用 Key 和请求账务留在原实例。逐项选择创建、跳过或替换；替换保留原凭据与历史账务。</p>
+    <section className="panel" data-dirty={!!configFile}><h2>配置搬运</h2><p>搬运来源、模型、路由、别名、预算、价格与运行设置。凭据、可用 Key 和请求账务留在原实例。逐项选择创建、跳过或替换；替换保留原凭据与历史账务。</p>
       <button disabled={pending.includes("config-export")} onClick={() => run("config-export", async () => { download(await api("config-transfer/export", "POST", { include_dependencies: true }), "cove-config.json"); })}>导出配置与依赖</button>
       <label>导入模式<select disabled={configBusy} value={transferMode} onChange={e=>{transferRevision.current++;setTransferMode(e.target.value);setConfigPreview(null);setResolutions({})}}><option value="create">创建新对象</option><option value="replace_selected">逐项选择替换</option></select></label>
-      <label>配置 JSON<input disabled={configBusy} type="file" accept=".json,application/json" onChange={e=>{transferRevision.current++;setConfigFile(e.target.files?.[0]||null);setConfigPreview(null);setResolutions({})}}/></label>
+      <label>配置 JSON<input ref={configInput} disabled={configBusy} type="file" accept=".json,application/json" onChange={e=>{transferRevision.current++;setConfigFile(e.target.files?.[0]||null);setConfigPreview(null);setResolutions({})}}/></label>
       <button disabled={configBusy||!configFile} onClick={()=>run("config-import",async()=>{
         const file=configFile,mode=transferMode,revision=++transferRevision.current;
         if(!file)return;
@@ -93,7 +117,7 @@ export function OperationsConsole({ api, status }: Props) {
           {(action==="replace"||action==="link")&&<label>现有对象<select disabled={configBusy} value={value.target_id||""} required onChange={e=>{const target=entity.targets.find((t:any)=>t.id===e.target.value);setResolutions(old=>({...old,[entity.local_id]:{action:action==="link"?"skip":"replace",target_id:target?.id||"",...(entity.kind==="price"?{target_hash:target?.hash}:{version:target?.version})}}))}}><option value="">选择明确目标</option>{entity.targets.map((target:any)=><option key={target.id} value={target.id}>{target.name||target.id}{target.version?` · v${target.version}`:""}</option>)}</select></label>}
         </fieldset>})}
         {configPreview.missing_credentials?.length>0&&<p>{configPreview.missing_credentials.length} 个创建候选账号需要单独配置凭据；替换和关联保留原账号。</p>}
-        <button disabled={configBusy||!configPreview.preview_id||configPreview.can_apply===false||Object.values(resolutions).some(v=>typeof v!=="string"&&!v.target_id)} onClick={()=>run("config-import",async()=>{const result=await api("config-transfer/import-apply","POST",{preview_id:configPreview.preview_id,expected_config_version:configPreview.expected_config_version,selected_resolutions:resolutions});setNotice(result.message);setConfigPreview(null);setResolutions({})})}>应用逐项选择</button>
+        <button disabled={configBusy||!configPreview.preview_id||configPreview.can_apply===false||Object.values(resolutions).some(v=>typeof v!=="string"&&!v.target_id)} onClick={()=>run("config-import",async()=>{const result=await api("config-transfer/import-apply","POST",{preview_id:configPreview.preview_id,expected_config_version:configPreview.expected_config_version,selected_resolutions:resolutions});setNotice(result.message);setConfigPreview(null);setConfigFile(null);if(configInput.current)configInput.current.value="";setResolutions({})})}>应用逐项选择</button>
       </div>}
     </section>
     <section className="panel"><h2>脱敏请求报表</h2><p>导出稳定快照中的公开统计列。各币种独立记录，未知 token 和费用保留为空；不含凭据、身份、路径、请求或响应正文。</p>

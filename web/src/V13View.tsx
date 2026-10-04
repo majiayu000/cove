@@ -1525,6 +1525,10 @@ export function V13View({ v }: { v: Record<string, any> }) {
                     </span>
                   </p>
                 </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button className="icon-button" title="管理 / Manage" aria-label="管理当前页面" onClick={v.managePage} type="button">
+                  <span data-i="">{"tune"}</span>
+                </button>
                 <button
                   onClick={v.openAdd}
                   style={{
@@ -1553,6 +1557,7 @@ export function V13View({ v }: { v: Record<string, any> }) {
                   <span data-l="zh">{"添加来源"}</span>
                   <span data-l="en">{"Add source"}</span>
                 </button>
+                </div>
               </header>
               <div
                 style={{

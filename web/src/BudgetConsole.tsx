@@ -16,28 +16,37 @@ export function BudgetConsole({ api, keys }: { api: API; keys: { id: string; nam
   const [scope, setScope] = useState("instance"), [period, setPeriod] = useState("calendar_month");
   const [error, setError] = useState(""), [notice, setNotice] = useState(""), [pending, setPending] = useState<string[]>([]);
   const [edits,setEdits]=useState<Record<string,{version:number;value:string;current?:Budget;readError?:string}>>({});
+  const [loading,setLoading]=useState(true);
   const running=useRef(new Set<string>()), mounted=useRef(true), revision=useRef(0);
   async function load() {
-    const sequence=++revision.current;
-    const [b, r] = await Promise.all([api("budgets"), api("routes")]);
-    if(mounted.current&&sequence===revision.current){setBudgets(old=>b.items.map((item:Budget)=>{const previous=old.find(v=>v.id===item.id);return previous&&previous.version>item.version?previous:item}));setRoutes(r.items)}
+    const sequence=++revision.current;setLoading(true);
+    const results = await Promise.allSettled([api("budgets"), api("routes")]);
+    if(!mounted.current||sequence!==revision.current)return;
+    setLoading(false);
+    if(results[0].status==="fulfilled"){const b=results[0].value;setBudgets(old=>b.items.map((item:Budget)=>{const previous=old.find(v=>v.id===item.id);return previous&&previous.version>item.version?previous:item}))}
+    if(results[1].status==="fulfilled")setRoutes(results[1].value.items);
+    const failures=results.filter((v):v is PromiseRejectedResult=>v.status==="rejected");
+    setError(failures.map(v=>v.reason.message).join("；"));
   }
   useEffect(() => { mounted.current=true;load().catch((e) => {if(mounted.current)setError(e.message)});return()=>{mounted.current=false;revision.current++}; }, []);
   async function run(id:string,action: () => Promise<void>) {
     if(running.current.has(id))return;
+    const trigger=document.activeElement instanceof HTMLElement?document.activeElement:null;
     running.current.add(id);setPending([...running.current]);setError("");setNotice("");
-    try { await action();await load(); } catch (e) {if(mounted.current)setError((e as Error).message)} finally {running.current.delete(id);if(mounted.current)setPending([...running.current])}
+    try { await action();await load(); } catch (e) {if(mounted.current)setError((e as Error).message)} finally {running.current.delete(id);if(mounted.current){setPending([...running.current]);requestAnimationFrame(()=>{if(trigger?.isConnected&&(document.activeElement===document.body||document.activeElement===trigger))trigger.focus()})}}
   }
   return <>
+    {loading&&<p role="status">正在读取预算…</p>}
+    {!loading&&error&&<button onClick={()=>void load()}>重新读取预算</button>}
     {error && <div className="error" role="alert">{error}</div>}{notice && <div className="notice" role="status">{notice}</div>}
     <section className="panel"><h2>本地预算</h2>
       <p>实例、路由和 Key 预算同时生效。软限制使用明确估算，未知费用保留预留；这里的可用额是本地预算余额。</p>
       <p>严格模式表示“本地已知计费规则下的准入上限”。当前只支持官方 OpenAI Responses 的无状态文本/函数工具：请求须指定 default 服务层和正数输出上限，并配置完整 token 价格。先获取提供方输入计数再原子预留；订阅、媒体、服务端工具及其他未知费用操作会明确拒绝。</p>
-      <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); run("create",async () => {
+      <form onSubmit={(e) => { e.preventDefault(); const element=e.currentTarget, f = new FormData(element); run("create",async () => {
         await api("budgets", "POST", { name: f.get("name"), scope: { kind: scope, ...(scope !== "instance" ? { id: f.get("scope_id") } : {}) },
           currency: f.get("currency"), amount_limit: f.get("amount"), mode: f.get("mode"),
           period: { kind: period, timezone: f.get("timezone"), ...(period === "fixed" ? { start_at: f.get("start"), end_at: f.get("end") } : {}) } });
-        setNotice("预算已创建，符合该作用域的后续请求会执行预算检查。");
+        element.querySelectorAll("input").forEach(input=>{input.value=input.defaultValue});element.dataset.dirty="false";setNotice("预算已创建，符合该作用域的后续请求会执行预算检查。");
       }); }}>
         <label>预算名称<input name="name" required maxLength={100}/></label>
         <label>作用域<select aria-label="作用域" value={scope} onChange={(e) => setScope(e.target.value)}><option value="instance">整个实例</option><option value="key">指定 API Key</option><option value="route">指定路由</option></select></label>
@@ -51,7 +60,7 @@ export function BudgetConsole({ api, keys }: { api: API; keys: { id: string; nam
         <button disabled={pending.includes("create")}>创建预算</button>
       </form>
     </section>
-    <section className="panel"><h2>预算占用与待核对</h2>{!budgets.length && <p>还没有预算。你可以创建实例预算，也可以为某个 Key 或路由单独设置预算。</p>}
+    <section className="panel"><h2>预算占用与待核对</h2>{!loading&&!error&&!budgets.length && <p>还没有预算。你可以创建实例预算，也可以为某个 Key 或路由单独设置预算。</p>}
       {budgets.map((b) => {
         const edit=edits[b.id], current=edit?.current&&edit.current.version>b.version?edit.current:b;
         const conflict=edit&&current.version!==edit.version;
@@ -61,7 +70,7 @@ export function BudgetConsole({ api, keys }: { api: API; keys: { id: string; nam
         <p>{new Date(b.period_start).toLocaleString()} 至 {new Date(b.period_end).toLocaleString()}</p>
         <div className="table-scroll"><table><thead><tr><th>币种</th><th>金额上限</th><th>已结算</th><th>未释放预留</th><th>其中待核对</th><th>本地可用额</th></tr></thead><tbody><tr><td>{b.currency}</td><td>{b.amount_limit}</td><td>{b.settled}</td><td>{b.reserved}</td><td>{b.pending}</td><td>{b.available}</td></tr></tbody></table></div>
         {b.blocked_reason && <p role="status">{b.blocked_reason}</p>}
-        <form className="inline-form" onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget), value=String(f.get("limit")), version=edit?.version??b.version; run(b.id,async () => {
+        <form data-dirty={!!edit} className="inline-form" onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget), value=String(f.get("limit")), version=edit?.version??b.version; run(b.id,async () => {
           try { await api(`budgets/${b.id}`, "PATCH", { version, amount_limit: value }); }
           catch(error) {
             if((error as Error&{status?:number}).status===409) {

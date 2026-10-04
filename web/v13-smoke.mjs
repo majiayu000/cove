@@ -1,6 +1,7 @@
 import { chromium, expect } from "@playwright/test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 
 // Use an isolated Cove instance; fixtures and generated keys never touch the user's instance.
@@ -15,6 +16,29 @@ const context = await browser.newContext({
 const page = await context.newPage();
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
+async function confirmDraft(trigger, accept) {
+  const waiting = page.waitForEvent("dialog");
+  const action = trigger();
+  const dialog = await waiting;
+  expect(dialog.type()).toBe("confirm");
+  expect(dialog.message()).toContain("未保存");
+  await (accept ? dialog.accept() : dialog.dismiss());
+  await action;
+}
+async function openManagement(name, target = page) {
+  const nav = { 来源: "来源", 模型: "模型", 路由: "路由", "API Keys": "Keys", 请求: "请求", 用量: "用量" };
+  if (nav[name]) {
+    await target.locator("nav").getByRole("button", { name: nav[name], exact: true }).click();
+    await target.getByRole("button", { name: name === "API Keys" ? "add 创建 Key" : "管理当前页面", exact: true }).click();
+  } else {
+    await target.keyboard.press("Meta+k");
+    await target.getByRole("dialog", { name: "Command palette" }).locator("input").fill(name);
+    await target.keyboard.press("Enter");
+  }
+  const editor = target.getByRole("dialog", { name: `${name}管理`, exact: true });
+  await expect(editor).toBeVisible();
+  return editor;
+}
 async function api(path, method = "GET", body) {
   return page.evaluate(
     async ({ path, method, body }) => {
@@ -347,7 +371,7 @@ try {
     amount_limit: "100", mode: "soft", period: { kind: "calendar_month", timezone: "UTC" },
   });
   // Reload the editor's budget choices after creating the isolated fixture.
-  await manager.getByRole("button", { name: "关闭管理", exact: true }).click();
+  await confirmDraft(() => manager.getByRole("button", { name: "关闭管理", exact: true }).click(), true);
   await page.getByRole("button", { name: "add 创建 Key", exact: true }).click();
   await manager.getByLabel("Key 名称", { exact: true }).fill("v13-test-key");
   await manager.locator("select[name=target]").selectOption(`source:${mockSource.id}`);
@@ -575,6 +599,184 @@ try {
   await routeSettings.getByRole("button", { name: "预览选择", exact: true }).click();
   await expect(routeSettings.getByText("选择 v13-test-model", { exact: true })).toBeVisible();
   await routeSettings.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  console.log("Checking GUI model/route edits, draft retention and audit.");
+  // Create and edit through the GUI, including a failed save and an explicit CAS rebase.
+  let catalog = await openManagement("模型");
+  await catalog.getByLabel("模型来源", { exact: true }).selectOption(paidSource.id);
+  await catalog.getByLabel("上游模型 ID", { exact: true }).fill("v13-gui-model");
+  await catalog.getByLabel("模型显示名", { exact: true }).fill("GUI model");
+  await catalog.getByRole("button", { name: "添加模型", exact: true }).click();
+  await expect(catalog.getByLabel("上游模型 ID", { exact: true })).toHaveValue("");
+  const guiModel = (await api("models")).items.find(m => m.upstream_model === "v13-gui-model");
+  const modelCard = () => catalog.locator("article").filter({ has: page.getByRole("heading", { name: "GUI model", exact: true }) });
+  await modelCard().getByText("配置价格与元数据", { exact: true }).click();
+  await modelCard().getByLabel("上下文上限", { exact: true }).fill("4096");
+  await modelCard().getByLabel("输出上限", { exact: true }).fill("128");
+  await modelCard().getByLabel("元数据依据", { exact: true }).fill("Isolated GUI fixture");
+  await modelCard().getByLabel("每百万输入 token", { exact: true }).fill("3");
+  await modelCard().getByLabel("每百万输出 token", { exact: true }).fill("6");
+  await modelCard().getByRole("button", { name: "保存模型设置", exact: true }).click();
+  await expect.poll(async () => (await api(`models/${guiModel.id}`)).context_limit).toBe(4096);
+  await expect(modelCard().getByRole("button", { name: "保存模型设置", exact: true })).toBeFocused();
+  expect((await api(`models/${guiModel.id}`)).price.input_per_million).toBe("3");
+  await modelCard().getByLabel("上下文上限", { exact: true }).fill("5000");
+  const abortModelSave = route => route.request().method() === "PATCH" ? route.abort() : route.continue();
+  await page.route(`**/admin/models/${guiModel.id}`, abortModelSave);
+  await modelCard().getByRole("button", { name: "保存模型设置", exact: true }).click();
+  await expect(catalog.getByRole("alert")).toBeVisible();
+  await expect(modelCard().getByLabel("上下文上限", { exact: true })).toHaveValue("5000");
+  await page.unroute(`**/admin/models/${guiModel.id}`, abortModelSave);
+  await confirmDraft(() => catalog.getByRole("button", { name: "关闭管理", exact: true }).click(), false);
+  await expect(modelCard().getByLabel("上下文上限", { exact: true })).toHaveValue("5000");
+  await confirmDraft(() => page.keyboard.press("Escape"), false);
+  await expect(catalog).toBeVisible();
+  const latestModel = await api(`models/${guiModel.id}`);
+  await api(`models/${guiModel.id}`, "PATCH", { version: latestModel.version, context_limit: 5100, metadata_reason: "Other isolated editor" });
+  await modelCard().getByRole("button", { name: "保存模型设置", exact: true }).click();
+  await expect(modelCard().getByRole("region", { name: "模型设置版本冲突", exact: true })).toBeVisible();
+  await expect(modelCard().getByLabel("上下文上限", { exact: true })).toHaveValue("5000");
+  await modelCard().getByRole("button", { name: "使用当前版本，保留模型输入", exact: true }).click();
+  await modelCard().getByRole("button", { name: "保存模型设置", exact: true }).click();
+  await expect.poll(async () => (await api(`models/${guiModel.id}`)).context_limit).toBe(5000);
+  await expect(modelCard().locator("form")).toHaveAttribute("data-dirty", "false");
+  await catalog.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  const routesGUI = await openManagement("路由");
+  const creation = routesGUI.locator("section").filter({ has: page.getByRole("heading", { name: "创建路由", exact: true }) });
+  await creation.getByLabel("名称", { exact: true }).fill("GUI empty route");
+  await creation.getByRole("button", { name: "创建路由", exact: true }).click();
+  await expect(creation.getByLabel("名称", { exact: true })).toHaveValue("");
+  const guiRoute = (await api("routes")).items.find(r => r.name === "GUI empty route");
+  await routesGUI.getByLabel("公开模型 ID", { exact: true }).fill("gui-public-model");
+  await routesGUI.getByLabel("别名路由", { exact: true }).selectOption(guiRoute.id);
+  await routesGUI.getByRole("button", { name: "添加别名", exact: true }).click();
+  await expect(routesGUI.getByLabel("公开模型 ID", { exact: true })).toHaveValue("");
+  const guiRouteRow = routesGUI.locator(".tool-row").filter({ has: page.locator("strong").getByText("GUI empty route", { exact: true }) });
+  await guiRouteRow.getByText("编辑路由", { exact: true }).click();
+  await guiRouteRow.locator(`input[name=members][value="${guiModel.id}"]`).check();
+  await guiRouteRow.locator(`input[name="priority_${guiModel.id}"]`).fill("2");
+  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  await expect.poll(async () => (await api(`routes/${guiRoute.id}`)).members.length).toBe(1);
+  await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeFocused();
+  await guiRouteRow.getByLabel("等待容量", { exact: true }).fill("2");
+  const currentRoute = await api(`routes/${guiRoute.id}`);
+  await api(`routes/${guiRoute.id}`, "PATCH", { version: currentRoute.version, queue_limit: 1 });
+  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  await expect(guiRouteRow.getByRole("region", { name: "路由设置版本冲突", exact: true })).toBeVisible();
+  await expect(guiRouteRow.getByLabel("等待容量", { exact: true })).toHaveValue("2");
+  await guiRouteRow.getByRole("button", { name: "使用当前版本，保留路由输入", exact: true }).click();
+  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  await expect.poll(async () => (await api(`routes/${guiRoute.id}`)).queue_limit).toBe(2);
+  await guiRouteRow.getByRole("button", { name: "预览选择", exact: true }).click();
+  await expect(routesGUI.getByText("选择 v13-gui-model", { exact: true })).toBeVisible();
+  const aliasRow = routesGUI.locator(".tool-row").filter({ has: page.locator("code").getByText("gui-public-model", { exact: true }) });
+  await aliasRow.getByRole("button", { name: "删除别名", exact: true }).click();
+  await expect(aliasRow).toHaveCount(0);
+  await guiRouteRow.getByRole("button", { name: "删除路由", exact: true }).click();
+  await expect(guiRouteRow).toHaveCount(0);
+  await routesGUI.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  // A dismissed close preserves secrets only in this editor; confirmed close clears them.
+  await page.locator("nav").getByRole("button", { name: "来源", exact: true }).click();
+  await page.getByRole("button", { name: "add 添加来源", exact: true }).click();
+  await chooser.getByRole("button", { name: "OpenAI Responses", exact: true }).click();
+  await sourceDialog.getByLabel("来源名称", { exact: true }).fill("Unsubmitted source draft");
+  await sourceDialog.getByLabel("来源 API Key", { exact: true }).fill("v13-unsubmitted-synthetic-secret");
+  await confirmDraft(() => sourceDialog.getByRole("button", { name: "关闭 ×", exact: true }).click(), false);
+  await expect(sourceDialog.getByLabel("来源 API Key", { exact: true })).toHaveValue("v13-unsubmitted-synthetic-secret");
+  await confirmDraft(() => page.keyboard.press("Escape"), true);
+  await expect(sourceDialog).not.toBeVisible();
+  await expect(page.locator('dialog[aria-label="来源编辑"] input[name=credential]')).toHaveValue("");
+  await page.getByRole("button", { name: "add 添加来源", exact: true }).click();
+  await chooser.getByRole("button", { name: "OpenAI Responses", exact: true }).click();
+  await sourceDialog.getByLabel("来源名称", { exact: true }).fill("Invalid source boundary fixture");
+  await sourceDialog.getByLabel("复用账号 ID（可选）", { exact: true }).fill(paidAccount.id);
+  await sourceDialog.getByLabel("Provider", { exact: true }).fill("openai_compatible");
+  await sourceDialog.getByLabel("API 基础地址", { exact: true }).fill("ftp://invalid.example/v1");
+  await sourceDialog.getByRole("button", { name: "保存来源", exact: true }).click();
+  await expect(sourceDialog.getByRole("alert")).toBeVisible();
+  await expect(sourceDialog.getByLabel("API 基础地址", { exact: true })).toBeFocused();
+  await expect(sourceDialog.getByLabel("API 基础地址", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await expect(sourceDialog.getByLabel("API 基础地址", { exact: true })).toHaveAttribute("aria-describedby", "source-form-error");
+  await expect(sourceDialog.getByLabel("API 基础地址", { exact: true })).toHaveValue("ftp://invalid.example/v1");
+  await confirmDraft(() => sourceDialog.getByRole("button", { name: "关闭 ×", exact: true }).click(), true);
+
+  await api("backups", "POST", { mode: "metadata", encrypt: false });
+  const audited = await openManagement("运维");
+  const audit = audited.getByRole("region", { name: "管理审计", exact: true });
+  await expect(audit.locator("tbody tr")).toHaveCount(20);
+  await expect(audit.getByText("已接受 · HTTP 202", { exact: true }).first()).toBeVisible();
+  await audit.getByRole("button", { name: "加载更多审计", exact: true }).click();
+  await expect.poll(() => audit.locator("tbody tr").count()).toBeGreaterThan(20);
+  await audit.getByLabel("审计操作结果", { exact: true }).selectOption("failed");
+  await expect(audit.getByText("失败 · HTTP 409", { exact: true }).first()).toBeVisible();
+  await audit.getByLabel("审计操作结果", { exact: true }).selectOption("running");
+  await expect(audit.getByText("当前筛选没有匹配的管理动作。", { exact: false })).toBeVisible();
+  await audit.getByRole("button", { name: "清空审计筛选", exact: true }).click();
+  const auditDownload = page.waitForEvent("download");
+  await audit.getByRole("button", { name: "下载当前审计记录", exact: true }).click();
+  const auditData = JSON.parse(readFileSync(await (await auditDownload).path(), "utf8"));
+  expect(auditData.items).toHaveLength(20);
+  expect(JSON.stringify(auditData)).not.toContain(clientKey);
+  expect(JSON.stringify(auditData)).not.toContain("v13-synthetic-paid-secret");
+  for (const item of auditData.items) {
+    expect(Object.keys(item).sort()).toEqual(["created_at", ...(item.entity_id ? ["entity_id"] : []), "http_status", "id", "method", "path", "state", "updated_at"].sort());
+    expect(item.path).not.toContain("?");
+  }
+  await page.screenshot({ path: `${output}/management-audit.png`, fullPage: true });
+  await audited.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  const unavailableCatalog = route => route.abort();
+  await page.route("**/admin/models", unavailableCatalog);
+  const failedCatalog = await openManagement("模型");
+  await expect(failedCatalog.getByRole("alert")).toBeVisible();
+  await expect(failedCatalog.getByText("还没有模型，可以获取目录或手工添加。", { exact: true })).toHaveCount(0);
+  await page.unroute("**/admin/models", unavailableCatalog);
+  await failedCatalog.getByRole("button", { name: "重新读取配置", exact: true }).click();
+  await expect(failedCatalog.getByRole("heading", { name: "GUI model", exact: true })).toBeVisible();
+  await expect(failedCatalog.getByRole("alert")).toHaveCount(0);
+  await failedCatalog.getByRole("button", { name: "关闭管理", exact: true }).click();
+
+  // Expanded forms and native-modal keyboard focus, across all ten management modules.
+  const modules = ["来源", "模型", "路由", "API Keys", "工具", "请求", "用量", "预算", "运维", "设置"];
+  for (const name of modules) {
+    console.log(`Checking expanded management: ${name}`);
+    const editor = await openManagement(name);
+    await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
+    await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count()).toBe(0);
+    const unlabeled = await editor.evaluate(element => [...element.querySelectorAll('input:not([type="hidden"]),select,textarea')].filter(input => !input.labels?.length && !input.getAttribute("aria-label") && !input.getAttribute("aria-labelledby")).map(input => input.name || input.tagName));
+    expect(unlabeled, `${name} expanded controls need labels`).toEqual([]);
+    for (const width of [375, 768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth), `${name} dialog overflow at ${width}`).toBe(false);
+    }
+    await page.keyboard.press("Tab");
+    expect(await editor.evaluate(element => element.contains(document.activeElement)), `${name} modal keeps keyboard focus`).toBe(true);
+    await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
+  const zoomProfile = mkdtempSync(resolve(tmpdir(), "cove-v13-zoom-"));
+  let zoomContext;
+  try {
+    mkdirSync(resolve(zoomProfile, "Default"));
+    writeFileSync(resolve(zoomProfile, "Default/Preferences"), JSON.stringify({ partition: { per_host_zoom_levels: { x: { "127.0.0.1": { zoom_level: Math.log(2) / Math.log(1.2), last_modified: "13400000000000000" } } } } }));
+    zoomContext = await chromium.launchPersistentContext(zoomProfile, { headless: true, channel: "chrome", viewport: null, args: ["--window-size=1280,900"] });
+    const zoomPage = zoomContext.pages()[0];
+    await zoomPage.goto(base);
+    expect(await zoomPage.evaluate(() => ({ width: innerWidth, ratio: devicePixelRatio, scale: visualViewport.scale }))).toEqual({ width: 640, ratio: 2, scale: 1 });
+    for (const name of modules) {
+      const editor = await openManagement(name, zoomPage);
+      await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
+      expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth), `${name} overflow at actual 200% zoom`).toBe(false);
+      await editor.getByRole("button", { name: "关闭管理", exact: true }).click();
+    }
+    await zoomPage.screenshot({ path: `${output}/actual-200-percent-zoom.png`, fullPage: true });
+  } finally {
+    await zoomContext?.close();
+    rmSync(zoomProfile, { recursive: true, force: true });
+  }
   await page.keyboard.press("Meta+k");
   await palette.locator("input").fill("工具");
   await page.keyboard.press("Enter");
@@ -598,7 +800,7 @@ try {
   }
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/deep-link/recovery/pagination/stale-filter, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, manual reconciliation, budget CRUD and explicit CAS resolution, local doctor and redacted download, persisted subscription scheduling, coding preview, real synthetic two-attempt safe dial failover, targeted model/route recovery, account occupancy, management access, mobile overflow, no page errors.",
+    "PASS: 8 pages, v13 layout geometry, theme/language persistence, command palette, source presets/save/toggle, subscription OAuth initiation/reopen/cancel/popup-block/error, model search, isolated mock-upstream request/drawer/deep-link/recovery/pagination/stale-filter, key creation/existing-budget/guide/last-use/revoke, unpriced budget rejection, manual reconciliation, budget CRUD and explicit CAS resolution, local doctor and redacted download, management audit filter/pagination/download, GUI model and route CRUD/CAS/network errors, dirty-close cancel/discard and credential clearing, expanded ten-module labels and 375/768/1280 geometry, actual Chrome 200% zoom, persisted subscription scheduling, coding preview, real synthetic two-attempt safe dial failover, targeted model/route recovery, account occupancy, management access, mobile overflow, no page errors.",
   );
 } finally {
   await context.close();

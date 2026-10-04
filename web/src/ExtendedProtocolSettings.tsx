@@ -38,7 +38,7 @@ export function ExtendedProtocolSettings({ api }: { api: API }) {
   }
   const writing = pending.includes("save") || pending.includes("clear");
   const enabled = !!draft && (draft.source_ids.length > 0 || draft.route_ids.length > 0);
-  return <section className="panel">
+  return <section className="panel" data-dirty={dirty.current}>
     <div className="section-title"><h2>本机结果缓存</h2><button disabled={pending.includes("refresh")} onClick={event => void run("refresh", load, event.currentTarget)}>刷新</button></div>
     <p>默认关闭。显式开启后，Cove 会在本机私有目录保存输入 hash 和输出正文。命中表示复用旧结果，不保证模型确定性。</p>
     <p>仅缓存温度为 0 的无状态、无工具纯文本请求。流、文件、图像、音频、签名历史和未知参数会跳过缓存。Provider 的 prompt cache 由上游独立报告。</p>

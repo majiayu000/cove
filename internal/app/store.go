@@ -223,6 +223,7 @@ func OpenStore(dir string) (*Store, error) {
  CREATE TABLE IF NOT EXISTS bindings(response_id TEXT NOT NULL, key_id TEXT NOT NULL, source_id TEXT NOT NULL, generation INTEGER NOT NULL, account_generation INTEGER NOT NULL, model TEXT NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE, PRIMARY KEY(response_id,key_id,source_id,generation,account_generation,model));
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+ CREATE INDEX IF NOT EXISTS operations_audit_created ON operations(json_extract(data,'$.kind'),julianday(json_extract(data,'$.created_at')) DESC,id DESC);
  PRAGMA user_version=2;`)
 	if err != nil {
 		db.Close()
@@ -548,7 +549,8 @@ func (s *Store) cleanup(days int) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("DELETE FROM accounting_audit WHERE created_at < ?", cutoff); err != nil {
+	auditCutoff := now.Add(-90 * 24 * time.Hour).Format(time.RFC3339Nano)
+	if _, err = tx.Exec("DELETE FROM accounting_audit WHERE created_at < ?", auditCutoff); err != nil {
 		return err
 	}
 	if _, err = tx.Exec("DELETE FROM reservations WHERE period_end <= ? AND status='settled' AND request_id IN (SELECT id FROM requests WHERE started < ?)", now.Format(time.RFC3339Nano), cutoff); err != nil {
@@ -557,7 +559,7 @@ func (s *Store) cleanup(days int) error {
 	if _, err = tx.Exec("DELETE FROM requests WHERE started < ? AND status NOT IN ('queued','admitted','dispatching','streaming') AND NOT EXISTS(SELECT 1 FROM reservations r WHERE r.request_id=requests.id) AND NOT EXISTS(SELECT 1 FROM accounting_audit a WHERE a.request_id=requests.id) AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.request_id=requests.id) AND NOT EXISTS(SELECT 1 FROM job_items ji WHERE ji.request_id=requests.id)", cutoff); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("DELETE FROM operations WHERE json_extract(data,'$.state') NOT IN ('running','pending','uncertain') AND json_extract(data,'$.updated_at') < ?", now.Add(-24*time.Hour).Format(time.RFC3339Nano)); err != nil {
+	if _, err = tx.Exec("DELETE FROM operations WHERE id IN (SELECT id FROM operations WHERE json_extract(data,'$.state') NOT IN ('running','pending','uncertain') AND json_extract(data,'$.updated_at') < CASE WHEN json_extract(data,'$.kind')='admin_action' THEN ? ELSE ? END LIMIT 500)", auditCutoff, now.Add(-24*time.Hour).Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -58,7 +58,7 @@ export function NotificationSettings({ api }: { api: API }) {
   function change(value:Partial<Settings>){dirty.current=true;setForm(current=>current&&({...current,...value}));setSampleVisible(false);setConfirmed(false);}
   function changeCredential(){dirty.current=true;setSampleVisible(false);setConfirmed(false);}
   const settingsDiff=(value:Settings)=>({version:value.version,enabled:value.enabled,url:value.url,signature:value.signature,event_kinds:value.event_kinds});
-  return <section className="panel" id="notifications">
+  return <section className="panel" id="notifications" data-dirty={dirty.current}>
     <div className="section-title"><h2>提醒与通知</h2><button disabled={pending.includes("settings-refresh")} onClick={e=>void run("settings-refresh",loadSettings,e.currentTarget)}>刷新通知设置</button></div>
     <p>提醒在本机按状态持续观测并记录恢复。额度未知时保留未知；已读不会解除故障。外部 webhook 默认关闭，启用后只发送所选类型的脱敏状态变化。</p>
     {error && <p className="error" role="alert">{error}</p>}{Object.entries(actionErrors).map(([action,message])=>message&&<p key={action} id={`notification-${action}-error`} className="error" role="alert">{message}</p>)}{notice && <p className="notice" role="status">{notice}</p>}

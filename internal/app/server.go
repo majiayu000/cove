@@ -310,6 +310,10 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) adminDispatch(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/admin/audit" {
+		a.auditAPI(w, r)
+		return
+	}
 	if a.notificationsAPI(w, r) {
 		return
 	}

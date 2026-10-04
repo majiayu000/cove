@@ -17,6 +17,7 @@ export function ClientConsole({ api, initialKind, initialModel, onChanged }: { a
   const [pending, setPending] = useState<Set<string>>(() => new Set()), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const revision = useRef(0), restoreRevision = useRef(0), loadRevision = useRef(0), mounted = useRef(true), running = useRef(new Set<string>());
   const configBusy = pending.has("preview") || pending.has("apply");
+  const configForm=useRef<HTMLFormElement>(null);
   const restoreBusy = !!restore && pending.has(`restore:${restore.change_id}`);
   const selected = clients.find((card) => card.kind === kind);
   async function load() {
@@ -54,7 +55,7 @@ export function ClientConsole({ api, initialKind, initialModel, onChanged }: { a
   async function applyPreview(selection: number) {
     if (!preview) return;
     const result = await api<Change>("client-changes", "POST", { preview_id: preview.preview_id, base_hashes: Object.fromEntries(preview.files.map((file) => [file.path, file.base_hash])), secret_delivery: "env_reference" });
-    if (current(selection)) { setNotice(`配置文件已应用（${result.id}）。请向客户端进程注入 ${preview.required_secret.env_name} 后自行启动；连接和工具尚未测试。`); setPreview(null); }
+    if (current(selection)) { if(configForm.current)configForm.current.dataset.dirty="false";setNotice(`配置文件已应用（${result.id}）。请向客户端进程注入 ${preview.required_secret.env_name} 后自行启动；连接和工具尚未测试。`); setPreview(null); }
     await load();
     await onChanged?.();
   }
@@ -78,7 +79,7 @@ export function ClientConsole({ api, initialKind, initialModel, onChanged }: { a
       <p>选择实际客户端和配置位置，再预览、应用或恢复。Cove 只修改显示的字段；Key 通过客户端进程环境交付。</p>
       {!clients.length && <p>尚无检测结果，可重新检测；检测失败会在上方显示原因。</p>}
       {clients.map((client) => <div className="tool-row" key={client.kind}><div><strong>{client.name}</strong><span>{client.version || "版本未知"} · {statusLabel[client.status] || client.status}</span></div><details><summary>配置卡依据</summary><p>{client.evidence}</p><p>规范基线版本 {client.contract_version}。本机版本另行验证的卡只证明原生配置解析。</p></details></div>)}
-      <form aria-describedby={error ? "client-config-error" : undefined} onSubmit={(event) => { event.preventDefault(); void run("preview", createPreview); }}>
+      <form ref={configForm} aria-describedby={error ? "client-config-error" : undefined} onSubmit={(event) => { event.preventDefault(); void run("preview", createPreview); }}>
         <div className="inline-form">
           <label>客户端<select value={kind} disabled={configBusy} onChange={(event) => { changed(); setKind(event.target.value); setScope(event.target.value === "codex" ? "user" : "project"); setRoot(""); setPath(""); }}>{clients.length ? clients.map((client) => <option value={client.kind} key={client.kind}>{client.name}</option>) : <><option value="codex">Codex CLI</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></>}</select></label>
           <label>作用域<select value={scope} disabled={configBusy} onChange={(event) => { changed(); setScope(event.target.value); setPath(""); }}><option value="user">用户 / 独立配置目录</option><option value="project">项目</option></select></label>
@@ -104,7 +105,7 @@ export function ClientConsole({ api, initialKind, initialModel, onChanged }: { a
       {!changes.length && <p>还没有客户端配置变更。应用成功后可在这里预览恢复。</p>}
       {changes.map((change) => <div className="tool-row" key={change.id}><div><strong>{change.kind} · {statusLabel[change.state] || change.state}</strong><code>{change.path}</code><span>{new Date(change.created_at).toLocaleString()} · {change.scope} · {change.id}</span></div><button disabled={pending.has(`restore-preview:${change.id}`) || pending.has(`restore:${change.id}`) || change.state === "restored"} onClick={(event) => { if (running.current.has(`change:${change.id}`)) return; restoreRevision.current++; setRestore(null); void run(`restore-preview:${change.id}`, (selection) => previewRestore(change, selection), event.currentTarget); }}>{pending.has(`restore-preview:${change.id}`) ? "正在预览恢复…" : "预览恢复"}</button></div>)}
     </section>
-    {restore && <section className="panel" aria-label="客户端恢复预览"><h2>恢复预览</h2><p><code>{restore.path}</code></p><p>当前 hash <code>{restore.current_hash}</code>。恢复只处理本次 Cove 修改的字段。</p>
+    {restore && <section className="panel" data-dirty={Object.keys(resolutions).length>0} aria-label="客户端恢复预览"><h2>恢复预览</h2><p><code>{restore.path}</code></p><p>当前 hash <code>{restore.current_hash}</code>。恢复只处理本次 Cove 修改的字段。</p>
       <div className="table-scroll"><table><thead><tr><th>字段</th><th>原值</th><th>Cove 值</th><th>当前值</th><th>恢复动作</th></tr></thead><tbody>{restore.fields.map((field) => <tr key={field.field}><td><code>{field.field}</code></td><td>{show(field.before)}</td><td>{show(field.ours)}</td><td>{show(field.current)}</td><td>{field.action === "conflict" ? <label>冲突处理<select aria-label={`${field.field} 冲突处理`} disabled={restoreBusy} value={resolutions[field.field] || ""} onChange={(event) => setResolutions((old) => ({ ...old, [field.field]: event.target.value }))}><option value="">请选择</option><option value="keep_current">保留用户当前值</option><option value="restore_before">还原私有保存的原值</option></select></label> : field.action === "already_before" ? "已是原值，无需改动" : "恢复原值"}</td></tr>)}</tbody></table></div>
       {!restore.fields.length && <p>本次记录的字段已经全部处理。</p>}
       <button disabled={restoreBusy || !restore.fields.length || restoreConflicts.some((field) => !resolutions[field.field])} onClick={(event) => void run(`restore:${restore.change_id}`, applyRestore, event.currentTarget)}>{restoreBusy ? "正在恢复…" : "按所选处理恢复"}</button>
