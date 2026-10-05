@@ -1,4 +1,14 @@
-## 2026-10-06 后续功能与真实验收
+## 2026-10-06 当前收尾结果
+
+功能提交 `a0643cf595f7` 的完整 Go race 共 723 个测试/子用例通过，零失败、零跳过；官方 SDK 34/34、生命周期 7/7、实际 HTTP 排队与重试 TTFT 回归通过。随后 `aa567f49ed2f` 仅将 Windows race 整套测试时限从默认 10 分钟改为 20 分钟，未改变生产超时或断言。[三平台 CI](https://github.com/majiayu000/cove/actions/runs/37365523138) 的 Linux、Windows、macOS 构建、检查、完整 race、隔离网页和打包均成功。各包核验 30 个文件及 194 个源码快照文件；Windows checkout 的 CRLF 与其他平台 LF 形成不同原始哈希，保留实际 BuildID，不重标为相同字节。
+
+本机与大阪运行冻结构建 `343e720e5e66…`。该 macOS arm64 DMG 已获 Apple Accepted（`2b6d95fb-fe4a-47e7-a6b4-1d7665a4f808`），票据、严格签名、Gatekeeper、30 个包内文件和隔离原生启动通过；第二台物理 Mac 安装/锁/权限/重启 25 项及 launchd/受控 SIGKILL 后手动启动恢复 20 项通过。合成性能保留原 `6047476412ae…` 构建：8 路流、1800 秒、百万记录的 7 项门槛通过，附加 TTFT P95 4.385ms、请求第一页 P95 1.236ms、取消释放 0.061s；不冒称大阪压力测试或最终构建的 30 分钟压力结果。
+
+在已批准的 New API `gpt-5.6-sol` 来源上，Continue 官方 VS Code 宿主、OpenCode 1.18.27 CLI、Cline 3.0.68 CLI 均完成真实 MCP 工具及结果回传。OpenCode/Cline 由模型实际加载隔离 Skill；Continue 的 Skill 由受控测试驱动加载执行。Cline 验收脚本使用 `+00:00` 时间戳时被官方解析器拒绝并重置来源，修正为 `Z` 后通过；Cove 生产配置原已使用 `Z`，没有相应生产修复。包含失败尝试在内，本轮共 27 次 Cove 生成请求，均限于批准来源和模型，所有临时 Key 在两小时内到期且已撤销，撤销后 401、私有配置和测试进程清理通过。实际请求数和每个构建范围见 `test-results/all-completion-20261006/execution.json`。
+
+[审阅 PR #3](https://github.com/majiayu000/cove/pull/3) 保持 draft，没有合并或发布正式版本。Windows 实机 `100.81.107.120` 最新 SSH 仍不可达；供应商注册/授权、完整资源与计费合同、正式账单、额外 IDE 自动配置和未覆盖的高级操作/物理实验仍以 [104 项实施台账](implementation-readiness.tsv) 的剩余栏为准。整个库仍未全部完成。
+
+## 2026-10-06 早期功能与验收记录（保留原 BuildID）
 
 修复请求开始时间在排队后才建立、运行指标从最后一次尝试计 TTFT 的问题：准入入口记录开始时间，尝试时间仍单独保存；请求详情、用量统计与 Prometheus 请求 TTFT 使用相同的逻辑请求开始时间。保留 `ttft-before.log` 中 3 秒等待被记成 1 秒的复现，定向 race 修复验证通过。TPM 预留和额度调用观测仍使用实际尝试派发时间，避免排队时间使限流预留过早过期；随后完整 race 另存于 `go-race-final.jsonl`，不覆盖初轮快照。没有改写历史记录。
 
