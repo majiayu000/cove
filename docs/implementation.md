@@ -1,3 +1,15 @@
+## 2026-10-06 后续功能与真实验收
+
+修复请求开始时间在排队后才建立、运行指标从最后一次尝试计 TTFT 的问题：准入入口记录开始时间，尝试时间仍单独保存；请求详情、用量统计与 Prometheus 请求 TTFT 使用相同的逻辑请求开始时间。保留 `ttft-before.log` 中 3 秒等待被记成 1 秒的复现，定向 race 修复验证通过。TPM 预留和额度调用观测仍使用实际尝试派发时间，避免排队时间使限流预留过早过期；随后完整 race 另存于 `go-race-final.jsonl`，不覆盖初轮快照。没有改写历史记录。
+
+冻结快照 `6047476412ae…` 的 `make build`、`make check`、SDK 34/34、生命周期 7/7、完整 v13 网页流程通过。完整 Go race 720 项通过，显式启用的 3 项安装 CLI 测试另行通过，合计 723 个唯一测试/子用例；没有把初次跳过写成完整运行零跳过。该快照 macOS 签名公证已 Accepted（`c0c4c039-e904-4176-a140-f52bf795a0cf`），钉合和 Gatekeeper 验证通过。后续文档变更不重标已有 BuildID。
+
+本人现有 New API 来源经大阪公网完成 8 次真实生成：同回合双工具及结果回传、50 消息历史、4 路并发与流断开释放；成功请求有完整用量，取消请求保留未知用量。Continue 1.3.40 的官方实际 VS Code 宿主也经此来源完成 MCP 工具两回合，实际加载并执行隔离 Skill/stdio MCP。所有临时 Key 撤销后的 401、隔离配置删除均已验。文件工具使用随包测试导出时遇到源码布局 worker 路径缺失，失败记录保留；未将其写成完整 GUI/文件编辑验收，也不据此指称生产客户端有同样问题。
+
+当前生产 App 与官方 OpenTelemetry Collector 0.162.0 的实际 TLS/OTLP 解析、父 trace、关闭 flush 与脱敏六项通过；只有隔离测试进程加入一次性 CA，未关闭证书验证。合成模型上游和真实 Collector 分开记录，不推定大阪已部署生产 Collector。[适配来源索引](spec/evidence/adapter-sources-v12.json)重新读取原附件的 24 个固定 commit 文件并保存哈希，补回失效的本地引用；不是恢复原始读取时间的哈希。
+
+本轮原始验收和失败记录在 `test-results/all-completion-20261006/`，具体证据与剩余范围仍以 [104 项实施台账](implementation-readiness.tsv) 为准。供应商独立授权/完整资源和计费合同、剩余 IDE 自动模型配置、其他提供方媒体/Files/Batch/WS/compact、正式账单对账及 Windows 物理桌面验收仍未闭合，不宣称整个库已全部完成。
+
 ## 2026-10-06 提交状态与后续验收
 
 本次提交包含单服务器企业多租户、客户端配置扩展、查询性能改进、Cove 自有 ChatGPT 授权和验证刷新修复。当前仍是开发预览；唯一完成台账为 [implementation-readiness.tsv](implementation-readiness.tsv)。源码和运维凭据分开，真实 Key、数据库、部署私有目录及验收原始文件不纳入提交。

@@ -126,6 +126,28 @@ func TestSpecObservabilityTerminalDedupAndPrivacy(t *testing.T) {
 		t.Fatal("counter declined when retention removed history")
 	}
 }
+
+func TestSpecObservabilityTTFTIncludesQueueAndEarlierAttempts(t *testing.T) {
+	a := contractApp(t, nil)
+	started := time.Now().UTC().Add(-4 * time.Second)
+	ended := started.Add(4 * time.Second)
+	content := started.Add(3 * time.Second)
+	r := Record{ID: "logical-request", AttemptID: "last-attempt", Protocol: "responses", Operation: "generate", Status: "succeeded", Started: started, AttemptStarted: started.Add(2 * time.Second), FirstContentAt: &content, Ended: &ended, QueueMS: 500}
+	a.observeExecution(r, Source{Provider: "openai"}, true)
+	// The runtime metric uses the same request start as the request detail and
+	// usage report. The last attempt's start excludes time the user waited.
+	w := lifecycleAdmin(a, "GET", "/admin/metrics", "", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "cove_ttft_seconds_count 1\n") || !strings.Contains(w.Body.String(), "cove_ttft_seconds_sum 3\n") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	beforeStart := started.Add(-time.Millisecond)
+	r.ID, r.AttemptID, r.FirstContentAt = "invalid-content-time", "other-attempt", &beforeStart
+	a.observeExecution(r, Source{Provider: "openai"}, true)
+	w = lifecycleAdmin(a, "GET", "/admin/metrics", "", "")
+	if !strings.Contains(w.Body.String(), "cove_ttft_seconds_count 1\n") {
+		t.Fatal("invalid content timestamp produced a TTFT sample", w.Body.String())
+	}
+}
 func TestSpecObservabilityBoundedOfflineTelemetry(t *testing.T) {
 	var calls atomic.Int32
 	a := contractApp(t, func(r *http.Request) (*http.Response, error) {

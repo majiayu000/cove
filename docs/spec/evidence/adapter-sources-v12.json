@@ -1,0 +1,222 @@
+{
+  "retrieved_at": "2026-10-05T19:16:57.096338+00:00",
+  "provenance": "Original appendix fixed-commit URLs re-read on 2026-10-06; no claim of the missing original retrieval hashes. Bodies not republished.",
+  "sources": [
+    {
+      "url": "https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/apps/docs/docs/features/skills.mdx",
+      "raw_url": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/apps/docs/docs/features/skills.mdx",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "b92c5adf9872ac9c17b329858ab24b3b5cb68601663b00327b7a3e0a274606c7",
+      "bytes": 13113
+    },
+    {
+      "url": "https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/ProviderSettingsManager.ts",
+      "raw_url": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/ProviderSettingsManager.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "f4fb7d25679b24242b3d47ba74df6ce696a6b3565b98ce34925298ed1246bb95",
+      "bytes": 20745
+    },
+    {
+      "url": "https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/importExport.ts",
+      "raw_url": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/importExport.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "6ce5fd2f3378dcf4406261cc0788e24f906d2426430044afa9cc8fa5f604b3b6",
+      "bytes": 11701
+    },
+    {
+      "url": "https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/utils/autoImportSettings.ts",
+      "raw_url": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/utils/autoImportSettings.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "367311f6902d124256c1f2315b371dd73901d1ddb9237888ceb078e53e4a8d71",
+      "bytes": 2993
+    },
+    {
+      "url": "https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/apps/vscode/src/shared/storage/state-keys.ts",
+      "raw_url": "https://raw.githubusercontent.com/cline/cline/647d8cb059f5083c53d959609ce04c82647ae0d6/apps/vscode/src/shared/storage/state-keys.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "ea912580ac6c282d162f6b88a2a3c20439c86de954b61b26bf23f1056351580b",
+      "bytes": 25508
+    },
+    {
+      "url": "https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/docs/customization/skills.mdx",
+      "raw_url": "https://raw.githubusercontent.com/cline/cline/647d8cb059f5083c53d959609ce04c82647ae0d6/docs/customization/skills.mdx",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "8adc713e2910078c1fd983c91c8977883b9e9ef5f82e58867a783fd071dae48b",
+      "bytes": 11078
+    },
+    {
+      "url": "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/config/markdown/loadMarkdownSkills.ts",
+      "raw_url": "https://raw.githubusercontent.com/continuedev/continue/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/config/markdown/loadMarkdownSkills.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "502d651f8e6282cb604efff4d8104f0d7b43f2918e1eef4016798881caa309a7",
+      "bytes": 3292
+    },
+    {
+      "url": "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/tools/implementations/readSkill.ts",
+      "raw_url": "https://raw.githubusercontent.com/continuedev/continue/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/tools/implementations/readSkill.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "a275635a169731727e3a0a88ce4a2f45a1134465a26e8628a47d6b153ce1387c",
+      "bytes": 1119
+    },
+    {
+      "url": "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/mcp/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/continuedev/continue/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/mcp/index.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "93f3d5ff84ed8cb789d7570ba9f9a69b6ea8b7816da03485fe79ec127f3a48e4",
+      "bytes": 1474
+    },
+    {
+      "url": "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/models.ts",
+      "raw_url": "https://raw.githubusercontent.com/continuedev/continue/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/models.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "5b863c0c97d1ba332ddc3dfd479fe0bb92fe83ca01b3fc2e9bd1a3448ea1b07c",
+      "bytes": 6942
+    },
+    {
+      "url": "https://github.com/google-gemini/gemini-cli/blob/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/server.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "c142a19cbecfe34a38cb6a4472bf846d5f8ce7cf23e81acb6f23d0f0fd16bd99",
+      "bytes": 17062
+    },
+    {
+      "url": "https://github.com/google-gemini/gemini-cli/blob/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/setup.ts",
+      "raw_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/setup.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "ad481423eb6de6d81f21797f1aad639e71475630032f1ce58fbe318e0504ff7e",
+      "bytes": 10495
+    },
+    {
+      "url": "https://github.com/google-gemini/gemini-cli/blob/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/types.ts",
+      "raw_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/code_assist/types.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "65b10b0bccb87965afadce906c8c13256d620de6b3e8c002d9ffb683e5b510f4",
+      "bytes": 11669
+    },
+    {
+      "url": "https://github.com/google-gemini/gemini-cli/blob/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/core/contentGenerator.ts",
+      "raw_url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/core/contentGenerator.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "dabe49427724e2aeca5de10a886ce52fccfc7073ed729048e5250122d0ae4a6e",
+      "bytes": 13952
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "3e7ba706ec738349a9c91d0d5b60f681bd704419c8c162c6df02e358893ad4fe",
+      "bytes": 46087
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/client.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/client.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "360f2b1c4c8e9053ac6de965e4ba66d94eb2fd8aa89d4d69de9249821af76ef9",
+      "bytes": 118661
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/compact_remote_v2.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/compact_remote_v2.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "b0dc8aa62fddaea2903852ab7bb989ed5e4b3a2b90ea4598890e1fbadac1c542",
+      "bytes": 48349
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/compact_remote_v2_attempt.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/src/compact_remote_v2_attempt.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "a090b41ffaa8e669c3c95eff70bb62caa953fecb946bb74bfed32f9121c39ea1",
+      "bytes": 5082
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/tests/suite/compact_remote.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/064c6b8c737f5b41d171fdda80bd9ef10ad06eb3/codex-rs/core/tests/suite/compact_remote.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "ff46f855db98ffa1cd17c6c6a62cc94a2b5461b6615aa108017746d0381c37ee",
+      "bytes": 62799
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/backend-client/src/client/rate_limit_resets.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/backend-client/src/client/rate_limit_resets.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "a85485c84698f3c86ac51529f9ccbab7790f5e1120ff4fe8d6172d11dc6b7450",
+      "bytes": 5777
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/codex-api/src/endpoint/models.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/codex-api/src/endpoint/models.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "b63ebf34bf4ae0490419a4cd976a0e935701d65f3e2be60f000d5fa6b692ad79",
+      "bytes": 14749
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b",
+      "bytes": 949
+    },
+    {
+      "url": "https://github.com/openai/codex/blob/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/protocol/src/openai_models.rs",
+      "raw_url": "https://raw.githubusercontent.com/openai/codex/50d9c5deac4aa8cafc95db886d1435726ff0f77c/codex-rs/protocol/src/openai_models.rs",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "961f3051af96a988f37151b9a3c1e92103d6d76a81a01a1a2fb8a30328e4282d",
+      "bytes": 77213
+    },
+    {
+      "url": "https://github.com/sst/opencode/blob/7945de208964a49300d7f770d1a71d078db9a4c4/packages/opencode/src/provider/provider.ts",
+      "raw_url": "https://raw.githubusercontent.com/sst/opencode/7945de208964a49300d7f770d1a71d078db9a4c4/packages/opencode/src/provider/provider.ts",
+      "reading_scope": "full file bytes; configuration or wire contracts only; no real account acceptance inferred",
+      "status": "retrieved",
+      "http_status": 200,
+      "sha256": "9fb8958a521bbc5a70e5e6d4ecb130149115fe891fb78bca0ae73a966b9f547a",
+      "bytes": 82051
+    }
+  ]
+}

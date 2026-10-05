@@ -19,7 +19,7 @@
 | Continue VS Code | `5522c6f44ca0ac3528b37244818fbfa39b5af470`；`1.3.40` | YAML v1模型及MCP schema |
 | Cursor | 本机 `3.20.21`；官方文档 2026-09-30读取 | MCP/Skills文件；没有据此证明该版模型设置的稳定文件写接口 |
 
-[来源索引](evidence/adapter-sources-v12.json)记录固定 URL、SHA-256 和读取范围；[合成样例](adapter-fixtures.json)记录配置、wire映射、三方恢复的输入和预期。所有 fixture 都是人工合成，**没有真实账号录包，没有客户端原生解析器执行结果**。公开源码中出现的内置 client ID/secret 不复制到发布配置或 fixture。
+[来源索引](evidence/adapter-sources-v12.json)于 2026-10-06 重新读取本附件的 24 个固定 commit 文件，记录 URL、SHA-256 和全文读取范围；原始索引未随仓库保留，本次不声称恢复了原读取时间的哈希。[合成样例](adapter-fixtures.json)记录配置、wire映射、三方恢复的输入和预期。所有 fixture 都是人工合成，**没有真实账号录包，没有客户端原生解析器执行结果**。公开源码中出现的内置 client ID/secret 不复制到发布配置或 fixture。
 
 三个状态分开记录：合同文本已经写明；可进入实现的外部条件是否满足；产品及真实账号验收是否通过。阻塞合同写明“不发请求、如何显示、缺什么、满足什么才能恢复”，仍不算成功路径已经获得外部证明。原 D01—D03 不因新增此附件自动关闭，也不把需求移出范围。
 
