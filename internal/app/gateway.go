@@ -368,6 +368,10 @@ func sourceStream(src Source, resp *http.Response) (string, io.Reader) {
 }
 
 func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string) (rec *Record) {
+	requestStarted := time.Now().UTC()
+	if lease := dataIngress(r); lease != nil && !lease.Started.IsZero() {
+		requestStarted = lease.Started
+	}
 	protocol := "responses"
 	if r.URL.Path == "/v1/chat/completions" {
 		protocol = "chat_completions"
@@ -896,7 +900,7 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 		reject(429, "此来源仍在冷却或恢复探测已占用", "")
 		return
 	}
-	rec = &Record{ID: requestID, Origin: "client", KeyID: key.ID, ClientName: key.Name, Fingerprint: key.Fingerprint, SourceID: src.ID, SourceName: src.Name, Generation: src.Generation, Model: publicModel, SentModel: model, Status: "dispatching", UpstreamStatus: "unknown", DeliveryStatus: "not_started", ObservationStatus: "complete", Started: time.Now().UTC(), Completeness: "unknown", Price: src.Price, AccountID: src.AccountID, AccountGeneration: src.AccountGeneration, RouteID: key.RouteID, AttemptID: id("att"), Sequence: 1, SelectionReasons: selectionReasons}
+	rec = &Record{ID: requestID, Origin: "client", KeyID: key.ID, ClientName: key.Name, Fingerprint: key.Fingerprint, SourceID: src.ID, SourceName: src.Name, Generation: src.Generation, Model: publicModel, SentModel: model, Status: "dispatching", UpstreamStatus: "unknown", DeliveryStatus: "not_started", ObservationStatus: "complete", Started: requestStarted, Completeness: "unknown", Price: src.Price, AccountID: src.AccountID, AccountGeneration: src.AccountGeneration, RouteID: key.RouteID, AttemptID: id("att"), Sequence: 1, SelectionReasons: selectionReasons}
 	if nativeDirect && protocol == "gemini" {
 		geminiDirect = &geminiObserver{store: a.Store, key: key, source: src, model: selectedCandidate.Model, record: rec, seen: map[int]bool{}, terminal: map[int]bool{}}
 	}
@@ -922,7 +926,7 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 	rec.Protocol = protocol
 	rec.Version = 1
 	rec.Submission = "possible"
-	rec.AttemptStarted = rec.Started
+	rec.AttemptStarted = time.Now().UTC()
 	rec.ReservedTokens = tokenEstimate
 	rec.TokenReservationSource = estimateKind
 	if adapter != nil {
@@ -954,7 +958,7 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 		reject(503, storageError().Error(), "")
 		return nil
 	}
-	a.reserveTPM(key, rec.ID, tokenEstimate, rec.Started)
+	a.reserveTPM(key, rec.ID, tokenEstimate, rec.AttemptStarted)
 	a.running[rec.ID] = cancel
 	a.runningSources[rec.ID] = src.ID
 	a.runningKeys[rec.ID] = key.ID
@@ -1066,10 +1070,10 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 			}
 			lastStart, _ := current.Quota["call_started_at"].(string)
 			last, _ := time.Parse(time.RFC3339Nano, lastStart)
-			if !rec.Started.Before(last) {
+			if !rec.AttemptStarted.Before(last) {
 				current.Quota["call_health"] = rec.Status
 				current.Quota["call_observed_at"] = now
-				current.Quota["call_started_at"] = rec.Started
+				current.Quota["call_started_at"] = rec.AttemptStarted
 			}
 			if e = a.Store.saveSource(current); e != nil {
 				a.markStorageFailure()

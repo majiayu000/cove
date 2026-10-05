@@ -128,8 +128,8 @@ func (a *App) observeExecution(r Record, src Source, logical bool) {
 		operation := metricLabel(operationName, "generate", "compact", "images.generate", "images.edit", "audio.transcribe", "audio.translate", "audio.speech", "embeddings", "rerank", "background", "batch", "files", "count_tokens", "warmup", "realtime", "cache_hit")
 		o.Requests[protocol+"\x00"+operation+"\x00"+outcome]++
 		o.Duration.add(r.Ended.Sub(r.Started).Seconds())
-		if r.FirstContentAt != nil && !r.FirstContentAt.Before(r.AttemptStarted) {
-			o.TTFT.add(r.FirstContentAt.Sub(r.AttemptStarted).Seconds())
+		if r.FirstContentAt != nil && !r.FirstContentAt.Before(r.Started) {
+			o.TTFT.add(r.FirstContentAt.Sub(r.Started).Seconds())
 		}
 	}
 	settings := o.settings
@@ -150,7 +150,7 @@ func (a *App) observeExecution(r Record, src Source, logical bool) {
 			}
 		}
 	}
-	start := r.Started.Add(-time.Duration(r.QueueMS) * time.Millisecond)
+	start := r.Started
 	if !r.RefreshTiming.Start.IsZero() && r.RefreshTiming.Start.Before(start) {
 		start = r.RefreshTiming.Start
 	}
@@ -187,7 +187,8 @@ func (a *App) observeExecution(r Record, src Source, logical bool) {
 	if newLogical {
 		o.enqueueSpan(span("gateway.request", trace.root, trace.parent, trace.started, *r.Ended, 2))
 		if r.QueueMS > 0 {
-			o.enqueueSpan(span("gateway.queue", randomTraceID(8), trace.root, r.Started.Add(-time.Duration(r.QueueMS)*time.Millisecond), r.Started, 1))
+			queueEnd := r.Started.Add(time.Duration(r.QueueMS) * time.Millisecond)
+			o.enqueueSpan(span("gateway.queue", randomTraceID(8), trace.root, r.Started, queueEnd, 1))
 		}
 	}
 

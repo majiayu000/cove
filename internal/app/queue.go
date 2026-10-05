@@ -128,6 +128,7 @@ type dataIngressLease struct {
 	Config           Config
 	ConfigVersion    int
 	QueuedFor        time.Duration
+	Started          time.Time
 }
 type dataIngressContextKey struct{}
 
@@ -136,6 +137,7 @@ func dataIngress(r *http.Request) *dataIngressLease {
 	return value
 }
 func (a *App) acquireResponsesIngress(w http.ResponseWriter, r *http.Request) (*http.Request, func(), bool) {
+	started := time.Now().UTC()
 	a.mu.Lock()
 	cfg := a.Config
 	key, err := a.Store.keyByDigest(digest(bearer(r)))
@@ -171,7 +173,7 @@ func (a *App) acquireResponsesIngress(w http.ResponseWriter, r *http.Request) (*
 	}
 	a.slots <- struct{}{}
 	a.keyActive[key.ID]++
-	lease := &dataIngressLease{KeyID: key.ID, RequestID: requestID, Config: cfg, ConfigVersion: version, QueuedFor: queuedFor}
+	lease := &dataIngressLease{KeyID: key.ID, RequestID: requestID, Config: cfg, ConfigVersion: version, QueuedFor: queuedFor, Started: started}
 	a.mu.Unlock()
 	release := func() {
 		cancel()
