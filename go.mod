@@ -19,6 +19,7 @@ require (
 	github.com/tiktoken-go/tokenizer v0.8.1
 	google.golang.org/genai v1.71.0
 	gopkg.in/yaml.v3 v3.0.1
+	golang.org/x/term v0.45.0
 )
 
 require (

@@ -219,6 +219,9 @@ func OpenStore(dir string) (*Store, error) {
  CREATE INDEX IF NOT EXISTS requests_started ON requests(started DESC,id DESC);
  CREATE INDEX IF NOT EXISTS requests_key_started ON requests(json_extract(data,'$.client_key_id'),started);
  CREATE INDEX IF NOT EXISTS requests_state_started ON requests(status,started);
+ CREATE INDEX IF NOT EXISTS requests_model_started ON requests(json_extract(data,'$.requested_model'),started DESC,id DESC);
+ CREATE INDEX IF NOT EXISTS requests_usage ON requests(status,started,json_extract(data,'$.usage.input_tokens'),json_extract(data,'$.usage.output_tokens'),json_extract(data,'$.usage_completeness'),json_extract(data,'$.estimated_cost'),json_extract(data,'$.price_snapshot.currency'),json_extract(data,'$.origin'),json_extract(data,'$.duration_ms'),json_extract(data,'$.first_content_at'),json_extract(data,'$.partial_estimated_cost'));
+ CREATE INDEX IF NOT EXISTS requests_costs ON requests(json_extract(data,'$.price_snapshot.currency'),json_extract(data,'$.estimated_cost'),json_extract(data,'$.partial_estimated_cost'));
  CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY, request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK(sequence>0), source_id TEXT NOT NULL REFERENCES sources(id), account_id TEXT NOT NULL REFERENCES accounts(id), data TEXT NOT NULL, UNIQUE(request_id,sequence));
  CREATE TABLE IF NOT EXISTS bindings(response_id TEXT NOT NULL, key_id TEXT NOT NULL, source_id TEXT NOT NULL, generation INTEGER NOT NULL, account_generation INTEGER NOT NULL, model TEXT NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE, PRIMARY KEY(response_id,key_id,source_id,generation,account_generation,model));
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);

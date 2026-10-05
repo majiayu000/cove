@@ -23,19 +23,21 @@ type CodexConfig struct {
 	RedirectURI   string `json:"redirect_uri"`
 }
 type Config struct {
-	Listen                     string      `json:"listen"`
-	DataDir                    string      `json:"data_dir"`
-	MaxBody                    int64       `json:"max_body_bytes"`
-	MaxResponse                int64       `json:"max_response_bytes"`
-	MaxEvent                   int         `json:"max_event_bytes"`
-	MaxConcurrent              int         `json:"max_concurrent"`
-	HeaderTimeout              int         `json:"header_timeout_seconds"`
-	IdleTimeout                int         `json:"idle_timeout_seconds"`
-	TotalTimeout               int         `json:"total_timeout_seconds"`
-	RetentionDays              int         `json:"retention_days"`
-	AllowPaidFallback          bool        `json:"allow_paid_fallback"`
-	SubscriptionQuotaThreshold int         `json:"subscription_quota_threshold"`
-	Codex                      CodexConfig `json:"codex"`
+	Listen                     string            `json:"listen"`
+	DataDir                    string            `json:"data_dir"`
+	MaxBody                    int64             `json:"max_body_bytes"`
+	MaxResponse                int64             `json:"max_response_bytes"`
+	MaxEvent                   int               `json:"max_event_bytes"`
+	MaxConcurrent              int               `json:"max_concurrent"`
+	HeaderTimeout              int               `json:"header_timeout_seconds"`
+	IdleTimeout                int               `json:"idle_timeout_seconds"`
+	TotalTimeout               int               `json:"total_timeout_seconds"`
+	RetentionDays              int               `json:"retention_days"`
+	AllowPaidFallback          bool              `json:"allow_paid_fallback"`
+	SubscriptionQuotaThreshold int               `json:"subscription_quota_threshold"`
+	Codex                      CodexConfig       `json:"codex"`
+	Enterprise                 *EnterpriseConfig `json:"enterprise,omitempty"`
+	PublicAPIBase              string            `json:"-"`
 }
 
 func LoadConfig(path string) (Config, error) { return LoadConfigWithDataDir(path, "") }
@@ -76,6 +78,11 @@ func LoadConfigWithDataDir(path, selectedDir string) (Config, error) {
 	}
 	if err := validateURL(c.Codex.AuthBaseURL); err != nil {
 		return c, err
+	}
+	if c.Enterprise != nil {
+		if err := c.Enterprise.validate(); err != nil {
+			return c, err
+		}
 	}
 	return c, nil
 }

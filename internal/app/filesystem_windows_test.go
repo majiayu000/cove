@@ -65,7 +65,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	name := strings.TrimSuffix(filepath.Base(executable), ".exe")
-	if name == "codex" || name == "claude" || name == "opencode" {
+	if name == "codex" || name == "claude" || name == "opencode" || name == "gemini" || name == "code" || name == "cline" {
 		version, err := os.ReadFile(filepath.Join(filepath.Dir(executable), ".cove-fixture-"+name+"-version"))
 		if err != nil {
 			panic(err)

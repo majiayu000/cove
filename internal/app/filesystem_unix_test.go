@@ -3,10 +3,26 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestSpecClientVersionChildPipeWaitBounded(t *testing.T) {
+	dir := t.TempDir()
+	command := "#!/bin/sh\n/bin/sleep 3 &\nprintf '%s\\n' 'codex-cli 0.160.0'\n"
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(command), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	began := time.Now()
+	card := detectClient(context.Background(), clientCard{Kind: "codex", ContractVersion: "0.160.0"})
+	if card.Status != "detection_failed" || time.Since(began) >= 2500*time.Millisecond {
+		t.Fatal("version descendant pipe was not bounded", card.Status, time.Since(began))
+	}
+}
 
 func installClientVersionFixture(t *testing.T, dir, name, version string) {
 	t.Helper()

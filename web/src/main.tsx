@@ -116,12 +116,15 @@ const labels: Record<string, string> = {
   complete: "完整",
 };
 const label = (s: string) => labels[s] || s;
-const sessionKey = "cove.management";
+const tenantID = window.location.pathname.match(/^\/t\/(tenant_[^/]+)\//)?.[1];
+const tenantPrefix = tenantID ? `/t/${tenantID}` : "";
+const sessionKey = "cove.management" + tenantPrefix;
+const EnterpriseConsole=React.lazy(()=>import("./EnterpriseConsole").then(module=>({default:module.EnterpriseConsole})));
 async function api<T = any>(
   path: string,
   method = "GET",
   body?: unknown,
-  options?: {responseType?: "blob"; contentType?: string; headers?:Record<string,string>},
+  options?: {responseType?: "blob"; contentType?: string; headers?:Record<string,string>; signal?: AbortSignal},
 ): Promise<T> {
   let session: string | null;
   try {
@@ -131,10 +134,11 @@ async function api<T = any>(
   }
   let r: Response;
   try {
-    r = await fetch("/admin/" + path, {
+    r = await fetch(tenantPrefix + "/admin/" + path, {
       method,
-      credentials: "omit",
+      credentials: tenantID ? "same-origin" : "omit",
       redirect: "error",
+      signal: options?.signal,
       headers: {
         ...(body !== undefined ? { "Content-Type": options?.contentType || "application/json" } : {}),
         ...(method!=="GET" && path!=="session" ? {"X-Cove-Action-Id":crypto.randomUUID()} : {}),
@@ -143,7 +147,8 @@ async function api<T = any>(
       },
       body: body === undefined ? undefined : body instanceof Blob ? body : JSON.stringify(body),
     });
-  } catch {
+  } catch (cause) {
+    if (options?.signal?.aborted) throw cause;
     throw new Error("无法连接本机 Cove 服务。请确认服务正在运行，再刷新页面；这不代表账号授权已失效。");
   }
   if(r.ok && options?.responseType==="blob") return await r.blob() as T;
@@ -179,7 +184,7 @@ function App() {
   const [aliases,setAliases]=useState<any[]>([]);
   const [logged, setLogged] = useState(false),
     [ready, setReady] = useState(false),
-    [page, setPage] = useState(() => {try{return localStorage.getItem("cove.ui.page") || "概览"}catch{return "概览"}}),
+    [page, setPage] = useState(() => {try{return localStorage.getItem("cove.ui.page" + tenantPrefix) || "概览"}catch{return "概览"}}),
     [error, setError] = useState(""),
     [errorField, setErrorField] = useState(""),
     [notice, setNotice] = useState(""),
@@ -265,7 +270,7 @@ function App() {
     const warn=(event:BeforeUnloadEvent)=>{if(sourceDialog.current?.open && sourceDirty.current || managementDialog.current?.open && hasManagementDraft()){event.preventDefault();event.returnValue=""}};
     window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);
   },[]);
-  useEffect(() => {try{localStorage.setItem("cove.ui.page",page)}catch{/* Navigation remains available for this session. */}},[page]);
+  useEffect(() => {try{localStorage.setItem("cove.ui.page" + tenantPrefix,page)}catch{/* Navigation remains available for this session. */}},[page]);
   useEffect(() => {
     const dialog = managementDialog.current;
     if (!dialog) return;
@@ -518,14 +523,14 @@ function App() {
     ? { model: selectedModel, input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }], stream: true, store: false }
     : { model: selectedModel, messages: [{ role: "user", content: "Hello" }], stream: true, ...(apiProtocol === "messages" ? { max_tokens: 1024 } : {}) };
   const shellJSON = "'" + JSON.stringify(apiPayload, null, 2).replaceAll("'", "'\\''") + "'";
-  const curlExample = `curl -N "http://${status.listen}${apiPath}" \\\n  -H "${apiProtocol === "gemini" ? "x-goog-api-key" : apiProtocol === "messages" ? "x-api-key" : "Authorization"}: ${apiProtocol === "messages" || apiProtocol === "gemini" ? "" : "Bearer "}$PERSONAL_GATEWAY_KEY" \\\n${apiProtocol === "messages" ? '  -H "anthropic-version: 2023-06-01" \\\n' : ""}  -H "Content-Type: application/json" \\\n  -d ${shellJSON}`;
+  const curlExample = `curl -N "${status.api_base_url || "http://" + status.listen}${apiPath}" \\\n  -H "${apiProtocol === "gemini" ? "x-goog-api-key" : apiProtocol === "messages" ? "x-api-key" : "Authorization"}: ${apiProtocol === "messages" || apiProtocol === "gemini" ? "" : "Bearer "}$PERSONAL_GATEWAY_KEY" \\\n${apiProtocol === "messages" ? '  -H "anthropic-version: 2023-06-01" \\\n' : ""}  -H "Content-Type: application/json" \\\n  -d ${shellJSON}`;
   const template = guideSource
-    ? `web_search = "disabled"\nmodel_provider = "gatt"\nmodel = ${JSON.stringify(selectedModel)}\n\n[model_providers.gatt]\nname = "Cove"\nbase_url = ${JSON.stringify("http://" + status.listen + "/v1")}\nenv_key = "PERSONAL_GATEWAY_KEY"\nwire_api = "responses"\nsupports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0`
+    ? `web_search = "disabled"\nmodel_provider = "gatt"\nmodel = ${JSON.stringify(selectedModel)}\n\n[model_providers.gatt]\nname = "Cove"\nbase_url = ${JSON.stringify((status.api_base_url || "http://" + status.listen) + "/v1")}\nenv_key = "PERSONAL_GATEWAY_KEY"\nwire_api = "responses"\nsupports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0`
     : "";
   const launchCommand = `(\n  set -e\n  COVE_CLIENT_HOME="$(mktemp -d \"\${TMPDIR:-/tmp}/cove-codex.XXXXXX\")"\n  chmod 700 "$COVE_CLIENT_HOME"\n  cat > "$COVE_CLIENT_HOME/config.toml" <<'COVE_CONFIG'\n${template}\nCOVE_CONFIG\n  printf '粘贴 Cove 客户端 Key（输入不显示）: '\n  read -r -s PERSONAL_GATEWAY_KEY\n  printf '\\n'\n  export PERSONAL_GATEWAY_KEY\n  CODEX_HOME="$COVE_CLIENT_HOME" codex\n)`;
   return (
     <div className="shell">
-      <V13Console api={api} page={page} sources={sources} keys={keys} requests={requests} routes={routes} aliases={aliases}
+      <V13Console enterprise={Boolean(tenantID)} api={api} page={page} sources={sources} keys={keys} requests={requests} routes={routes} aliases={aliases}
         logins={login} onLogin={loginSource}
         onCancelLogin={s=>run(async()=>{await api(`sources/${s.id}/login`, "DELETE");await refresh();},s.id)}
         hasMoreRequests={!!cursor} onMoreRequests={loadMoreRequests}
@@ -533,9 +538,10 @@ function App() {
         onPage={next=>{setPage(next);setError("");setNotice("");closeDetail()}}
         onManage={(next,id)=>{setFreshKey("");setManagement({page:next,id})}}
         onAdd={preset=>{
+		  if(tenantID&&preset==="codex"){setError("企业模式使用本租户显式凭据；本机订阅授权请在桌面版完成。");return}
           sourceDirty.current=false;setErrorField("");
           const defaults:Partial<Record<string,{kind:string;provider:string;native_protocol:string;base_url:string}>> = {
-            codex:{kind:"codex_subscription",provider:"codex",native_protocol:"responses",base_url:""},
+            codex:{kind:"codex_subscription",provider:"codex",native_protocol:"responses",base_url:"https://api.openai.com/v1"},
             openai:{kind:"api_key",provider:"openai",native_protocol:"responses",base_url:"https://api.openai.com/v1"},
             anthropic:{kind:"api_key",provider:"anthropic",native_protocol:"messages",base_url:"https://api.anthropic.com"},
             deepseek:{kind:"api_key",provider:"openai_compatible",native_protocol:"chat_completions",base_url:"https://api.deepseek.com/v1"},
@@ -660,12 +666,11 @@ function App() {
                     {s.quota.last_error&&<p className="hint">{s.quota.last_error}</p>}
                     {s.quota.observed_at&&<p className="hint">观测 {new Date(s.quota.observed_at).toLocaleString()}{s.quota.expires_at?` · 过期 ${new Date(s.quota.expires_at).toLocaleString()}`:""}</p>}
                     {(s.quota.windows||[]).map((window,index)=><p className="hint" key={window.dimension+index}>{window.limit_name||window.dimension} · {window.used_percent==null?"用量未知":`已用 ${window.used_percent}%`}{window.reset_at?` · 重置 ${new Date(window.reset_at).toLocaleString()}`:""} · {s.quota.status==="available"&&window.status==="available"?"当前观测":"旧值或未知"}</p>)}
-                    {s.kind==="codex_subscription"&&<details><summary>刷新与窗口历史</summary><p>查询仅观测额度，不产生模型输出；窗口按提供方单位保存，过期值不作为当前余额。</p><button disabled={sourceBusy} onClick={()=>runSource(async()=>{let op=await api(`sources/${s.id}/quota-refresh`,"POST",{});let delay=1000;while(op.state==="running"){await new Promise(r=>setTimeout(r,delay));op=await api(`operations/${op.id}`);delay=Math.min(delay*2,8000)}await refresh();if(op.state&&op.state!=="succeeded")throw new Error(op.error||"观测失败，旧窗口保留");setNotice(op.cached?"仍在刷新间隔内，保留当前观测。":"额度观测已完成。")})}>刷新额度</button><button disabled={sourceBusy} onClick={()=>runSource(async()=>{const value=await api(`sources/${s.id}/quota-history`);setQuotaHistory(old=>({...old,[s.id]:value.data}))})}>读取近30天历史</button>{quotaHistory[s.id]?.map((snapshot,index)=><p className="hint" key={index}>{snapshot.observed_at?new Date(snapshot.observed_at).toLocaleString():"观测时间未知"} · {snapshot.status} · {(snapshot.windows||[]).map((window:any)=>`${window.limit_name||window.dimension}: ${window.used_percent==null?"未知":window.used_percent+"%"}`).join("；")}</p>)}</details>}
+                    {s.kind==="codex_subscription"&&s.base_url!=="https://api.openai.com/v1"&&<details><summary>刷新与窗口历史</summary><p>查询仅观测额度，不产生模型输出；窗口按提供方单位保存，过期值不作为当前余额。</p><button disabled={sourceBusy} onClick={()=>runSource(async()=>{let op=await api(`sources/${s.id}/quota-refresh`,"POST",{});let delay=1000;while(op.state==="running"){await new Promise(r=>setTimeout(r,delay));op=await api(`operations/${op.id}`);delay=Math.min(delay*2,8000)}await refresh();if(op.state&&op.state!=="succeeded")throw new Error(op.error||"观测失败，旧窗口保留");setNotice(op.cached?"仍在刷新间隔内，保留当前观测。":"额度观测已完成。")})}>刷新额度</button><button disabled={sourceBusy} onClick={()=>runSource(async()=>{const value=await api(`sources/${s.id}/quota-history`);setQuotaHistory(old=>({...old,[s.id]:value.data}))})}>读取近30天历史</button>{quotaHistory[s.id]?.map((snapshot,index)=><p className="hint" key={index}>{snapshot.observed_at?new Date(snapshot.observed_at).toLocaleString():"观测时间未知"} · {snapshot.status} · {(snapshot.windows||[]).map((window:any)=>`${window.limit_name||window.dimension}: ${window.used_percent==null?"未知":window.used_percent+"%"}`).join("；")}</p>)}</details>}
                     {s.verification.request_id && <button className="text" onClick={() => runSource(async () => {const selected=++detailRevision.current;const result=await api(`requests/${s.verification.request_id}`);if(selected===detailRevision.current)setDetail(result)})}>查看最近文本测试 →</button>}
                     {s.kind === "codex_subscription" && (
                       <p className="hint">
-                        使用官方 Codex
-                        客户端标识进行独立授权实验。登录成功不代表工具调用已验证。
+                        {s.base_url==="https://api.openai.com/v1"?"通过 OpenAI 官方本地应用注册授权 Cove；计划使用权限由授权页决定，登录成功不代表调用已验证。额度请在 ChatGPT 查看。":"此来源使用 Codex 客户端标识；Cove 独立注册来源使用公开 ChatGPT 授权流程。"}
                       </p>
                     )}
                     {login[s.id] && login[s.id].status !== "idle" && (
@@ -895,7 +900,7 @@ function App() {
           </>
         )}
         {(operationPage === "模型" || operationPage === "路由") && <ConsoleModules api={api} sources={sources} clientKeys={keys} page={operationPage} selectedId={management?.id} onChanged={refresh} />}
-        {operationPage === "工具" && <><ClientConsole api={api} onChanged={refresh} initialKind={management?.id?.split(":")[0]} initialModel={management?.id?.split(":").slice(1).join(":")}/><ExtendedProtocolSettings api={api}/><ConfigExtensionsConsole api={api}/><NativeOperationCapabilities api={api} sources={sources} onChanged={refresh}/></>}
+        {operationPage === "工具" && <><ClientConsole api={api} clientKeys={keys} onChanged={refresh} initialKind={management?.id?.split(":")[0]} initialModel={management?.id?.split(":").slice(1).join(":")}/><ExtendedProtocolSettings api={api}/><ConfigExtensionsConsole api={api}/><NativeOperationCapabilities api={api} sources={sources} onChanged={refresh}/></>}
         {operationPage === "运维" && <><NotificationSettings api={api}/><ResourceConsole api={api}/><OperationsConsole api={api} status={status}/></>}
         {operationPage === "预算" && <BudgetConsole api={api} keys={keys}/>}
         {operationPage === "API Keys" && (
@@ -1488,11 +1493,11 @@ function App() {
                   disabled={!!editing}
                   name="kind"
                   value={form.kind}
-                  onChange={(e) => {const kind=e.target.value;setForm({...form,kind,provider:kind==="none"?"local":kind==="aws_profile"?"bedrock":kind==="google_adc"||kind==="service_account"?"vertex":"openai_compatible",native_protocol:kind==="google_adc"||kind==="service_account"?"gemini":"responses",cloud_config:kind==="google_adc"?{vertex_credentials_mode:"adc"}:kind==="service_account"?{vertex_credentials_mode:"service_account"}:{}})}}
+                  onChange={(e) => {const kind=e.target.value;setForm({...form,kind,base_url:kind==="codex_subscription"?"https://api.openai.com/v1":form.base_url,provider:kind==="none"?"local":kind==="aws_profile"?"bedrock":kind==="google_adc"||kind==="service_account"?"vertex":"openai_compatible",native_protocol:kind==="google_adc"||kind==="service_account"?"gemini":"responses",cloud_config:kind==="google_adc"?{vertex_credentials_mode:"adc"}:kind==="service_account"?{vertex_credentials_mode:"service_account"}:{}})}}
                 >
                   <option value="api_key">API Key</option><option value="none">明确无认证的本机服务</option><option value="aws_profile">AWS Bedrock · 选定 profile</option><option value="google_adc">Vertex · Google ADC</option><option value="service_account">Vertex · 服务账号 JSON</option>
                   <option value="codex_subscription">
-                    Codex 订阅 · 独立授权实验
+                    ChatGPT 订阅 · 授权 Cove
                   </option>
                 </select>
               </label>
@@ -1555,4 +1560,4 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(tenantID || document.getElementById("cove-enterprise") ? <React.Suspense fallback={<main className="login-shell">正在加载企业登录…</main>}><EnterpriseConsole tenantID={tenantID} renderAdmin={()=><App/>}/></React.Suspense> : <App />);

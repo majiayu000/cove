@@ -29,6 +29,10 @@ func (a *App) accountsAPI(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &in) {
 			return
 		}
+		if a.Config.PublicAPIBase != "" && (in.AuthType == "aws_profile" || in.AuthType == "google_adc" || in.AuthType == "codex_subscription") {
+			fail(w, 422, "企业模式需要本租户显式凭据，不能使用主机 profile/ADC 或本机订阅登录", "auth_type")
+			return
+		}
 		valid := in.AuthType == "api_key" && (in.Provider == "openai" || in.Provider == "openai_compatible" || in.Provider == "anthropic" || in.Provider == "gemini" || in.Provider == "azure") || in.AuthType == "none" && (in.Provider == "ollama" || in.Provider == "local") || in.AuthType == "codex_subscription" && in.Provider == "codex"
 		valid = valid || in.Provider == "bedrock" && in.AuthType == "aws_profile" || in.Provider == "vertex" && (in.AuthType == "google_adc" || in.AuthType == "service_account")
 		if !valid {
@@ -214,9 +218,25 @@ func (a *App) accountsAPI(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, storageError().Error(), "")
 		return
 	}
+	revocation := "unknown"
+	if len(parts) == 4 && parts[3] == "logout" {
+		for _, src := range sources {
+			if src.AccountID == v.ID && !src.Deleted && chatGPTDirectSource(src) {
+				revocation = a.revokeChatGPTSessionLocked(r.Context(), src, ref)
+				break
+			}
+		}
+	}
 	if ref != nextRef {
 		a.cleanupSecret(ref)
 	}
 	a.signalAdmission()
+	if len(parts) == 4 && parts[3] == "logout" {
+		writeJSON(w, 200, struct {
+			Account
+			UpstreamRevocation string `json:"upstream_revocation"`
+		}{v, revocation})
+		return
+	}
 	writeJSON(w, 200, v)
 }

@@ -358,6 +358,10 @@ func (a *App) cloudHTTPClient(src Source, max int64, tap *cloudWireTap) *http.Cl
 // is lazy: reading it advances the SDK iterator in the existing request task.
 // There is no second executor or detached generation goroutine.
 func (a *App) cloudUpstream(ctx context.Context, src Source, body map[string]json.RawMessage, protocol string, max int64) (*http.Response, error) {
+	selection := cloudSelection(src)
+	if a.Config.PublicAPIBase != "" && (src.Provider == "bedrock" || selection == nil || selection.VertexCredentialsMode != "service_account") {
+		return nil, &cloudBeforeSendError{Message: "企业来源不能使用主机 AWS profile 或 Google ADC；需要本租户显式凭据"}
+	}
 	return a.cloudUpstreamWith(ctx, src, cloudSelection(src), body, protocol, max, cloudFactories())
 }
 func (a *App) cloudUpstreamWith(ctx context.Context, src Source, c *CloudSelection, body map[string]json.RawMessage, protocol string, max int64, f cloudSDKFactories) (*http.Response, error) {

@@ -203,7 +203,7 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 		accountingFailure(w, err)
 		return
 	}
-	query := `SELECT status,count(*),coalesce(sum(json_extract(data,'$.usage.input_tokens')),0),coalesce(sum(json_extract(data,'$.usage.output_tokens')),0),sum(json_extract(data,'$.usage.input_tokens') IS NOT NULL),sum(json_extract(data,'$.usage.output_tokens') IS NOT NULL),sum(json_extract(data,'$.usage_completeness')='unknown'),sum(json_extract(data,'$.usage_completeness')='partial'),sum(json_extract(data,'$.estimated_cost') IS NULL OR json_extract(data,'$.price_snapshot.currency') IS NULL),sum(json_extract(data,'$.origin')='admin_test'),coalesce(sum(json_extract(data,'$.duration_ms')),0) FROM requests WHERE ` + where + ` GROUP BY status`
+	query := `SELECT status,count(*),coalesce(sum(json_extract(data,'$.usage.input_tokens')),0),coalesce(sum(json_extract(data,'$.usage.output_tokens')),0),sum(json_extract(data,'$.usage.input_tokens') IS NOT NULL),sum(json_extract(data,'$.usage.output_tokens') IS NOT NULL),sum(json_extract(data,'$.usage_completeness')='unknown'),sum(json_extract(data,'$.usage_completeness')='partial'),sum(json_extract(data,'$.estimated_cost') IS NULL OR json_extract(data,'$.price_snapshot.currency') IS NULL),sum(json_extract(data,'$.origin')='admin_test'),coalesce(sum(json_extract(data,'$.duration_ms')),0),sum((julianday(json_extract(data,'$.first_content_at'))-julianday(started))*86400000),count(json_extract(data,'$.first_content_at')) FROM requests WHERE ` + where + ` GROUP BY status`
 	rows, err := a.Store.DB.Query(query, args...)
 	if err != nil {
 		accountingFailure(w, err)
@@ -211,10 +211,13 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	states := map[string]int64{}
 	var requests, input, output, knownInput, knownOutput, unknown, partial, unknownCost, tests, duration int64
+	var ttftKnown int64
+	var ttftTotal float64
 	for rows.Next() {
 		var state string
-		var count, i, o, ki, ko, u, p, uc, t, d int64
-		if err = rows.Scan(&state, &count, &i, &o, &ki, &ko, &u, &p, &uc, &t, &d); err != nil {
+		var count, i, o, ki, ko, u, p, uc, t, d, knownTTFT int64
+		var stateTTFT sql.NullFloat64
+		if err = rows.Scan(&state, &count, &i, &o, &ki, &ko, &u, &p, &uc, &t, &d, &stateTTFT, &knownTTFT); err != nil {
 			break
 		}
 		states[state] = count
@@ -228,6 +231,10 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 		unknownCost += uc
 		tests += t
 		duration += d
+		ttftKnown += knownTTFT
+		if stateTTFT.Valid {
+			ttftTotal += stateTTFT.Float64
+		}
 	}
 	if err == nil {
 		err = rows.Err()
@@ -238,7 +245,11 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var attempts int64
-	err = a.Store.DB.QueryRow("SELECT count(*) FROM attempts WHERE request_id IN (SELECT id FROM requests WHERE "+where+")", args...).Scan(&attempts)
+	attemptQuery := "SELECT count(*) FROM attempts"
+	if where != "1=1" {
+		attemptQuery += " WHERE request_id IN (SELECT id FROM requests WHERE " + where + ")"
+	}
+	err = a.Store.DB.QueryRow(attemptQuery, args...).Scan(&attempts)
 	if err != nil {
 		accountingFailure(w, err)
 		return
@@ -297,23 +308,20 @@ func (a *App) usageAPI(w http.ResponseWriter, r *http.Request) {
 	if requests > 0 {
 		totalDuration = float64(duration) / float64(requests)
 	}
-	var ttft sql.NullFloat64
-	var ttftKnown int64
-	// Request-level TTFT includes queueing and retries, and ends at semantic
-	// content. Metadata/keepalive-only requests have no sample.
-	err = a.Store.DB.QueryRow(`SELECT avg((julianday(json_extract(data,'$.first_content_at'))-julianday(started))*86400000),count(json_extract(data,'$.first_content_at')) FROM requests WHERE `+where, args...).Scan(&ttft, &ttftKnown)
-	if err != nil {
-		accountingFailure(w, err)
-		return
-	}
+	// Only requests with semantic content contribute to the weighted mean.
 	var ttftMS any
-	if ttft.Valid {
-		ttftMS = ttft.Float64
+	if ttftKnown > 0 {
+		ttftMS = ttftTotal / float64(ttftKnown)
 	}
+
 	// Reservations include unknown costs that remain occupied after restart. These
 	// sums are exact decimal arithmetic and are distinct from provider quota.
 	reservations := map[string]map[string]string{}
-	rows, err = a.Store.DB.Query(`SELECT budget_id,currency,reserved_amount,pending_amount FROM reservations WHERE request_id IN (SELECT id FROM requests WHERE `+where+`)`, args...)
+	reservationQuery := "SELECT budget_id,currency,reserved_amount,pending_amount FROM reservations"
+	if where != "1=1" {
+		reservationQuery += " WHERE request_id IN (SELECT id FROM requests WHERE " + where + ")"
+	}
+	rows, err = a.Store.DB.Query(reservationQuery, args...)
 	if err != nil {
 		accountingFailure(w, err)
 		return

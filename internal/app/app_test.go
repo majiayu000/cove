@@ -36,7 +36,7 @@ func (v *memorySecrets) Get(k string) (string, error) {
 	defer v.mu.Unlock()
 	s, ok := v.values[k]
 	if !ok {
-		return "", errors.New("missing credential")
+		return "", fmt.Errorf("missing credential: %w", os.ErrNotExist)
 	}
 	return s, nil
 }

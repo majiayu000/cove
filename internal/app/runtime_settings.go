@@ -210,7 +210,11 @@ func (a *App) settingsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		preview = map[string]any{"days": *state.RetentionDays, "candidate_requests": eligible - int(protected.Int64), "protected_requests": int(protected.Int64)}
 	}
-	writeJSON(w, 200, map[string]any{"version": state.Version, "retention_days": a.Config.RetentionDays, "limits": a.Config, "applied_now": applied, "restart_required": pending, "rejected": []string{}, "retention_preview": preview, "backup": "运维页可创建一致元数据备份并准备全新恢复目录。"})
+	limits := a.Config
+	if limits.PublicAPIBase != "" {
+		limits.DataDir = ""
+	}
+	writeJSON(w, 200, map[string]any{"version": state.Version, "retention_days": a.Config.RetentionDays, "limits": limits, "applied_now": applied, "restart_required": pending, "rejected": []string{}, "retention_preview": preview, "backup": "运维页可创建一致元数据备份并准备全新恢复目录。"})
 }
 
 func (a *App) retentionCleanupAPI(w http.ResponseWriter, r *http.Request) {

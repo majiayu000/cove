@@ -125,6 +125,10 @@ type codexCatalogCache struct {
 func fixedCodexObservationSource(src Source) bool {
 	return src.Kind == "codex_subscription" && src.Provider == "codex" && strings.TrimRight(src.BaseURL, "/") == "https://chatgpt.com/backend-api/codex"
 }
+
+func chatGPTDirectSource(src Source) bool {
+	return src.Kind == "codex_subscription" && src.Provider == "codex" && strings.TrimRight(src.BaseURL, "/") == chatGPTResource
+}
 func quotaSnapshot(src Source) codexQuotaSnapshot {
 	var q codexQuotaSnapshot
 	b, _ := json.Marshal(src.Quota)
@@ -225,7 +229,10 @@ func quotaObservationFail(w http.ResponseWriter, err error) {
 }
 
 func (a *App) startCodexObservationLocked(src Source, kind string, state *quotaObservationState, now time.Time) (*Operation, error) {
-	if !fixedCodexObservationSource(src) {
+	if !fixedCodexObservationSource(src) && !(kind == "models" && chatGPTDirectSource(src)) {
+		if kind == "quota" && chatGPTDirectSource(src) {
+			return nil, &accountingError{Status: 422, Field: "source", Message: "ChatGPT 独立授权没有公开额度 GET 合同；请查看 https://chatgpt.com/settings/usage，不能沿用 Codex 私有额度接口"}
+		}
 		return nil, &accountingError{Status: 422, Field: "source", Message: "此来源没有固定版本的独立模型/额度 GET 合同"}
 	}
 	if !src.Enabled || src.Deleted || !src.Configured || src.AuthStatus != "logged_in" {
@@ -234,7 +241,7 @@ func (a *App) startCodexObservationLocked(src Source, kind string, state *quotaO
 	if a.stagedAdmission || a.stopping {
 		return nil, &accountingError{Status: 503, Message: "服务尚未开放观测准入"}
 	}
-	if kind == "models" && (a.Config.Codex.ClientVersion == "" || len(a.Config.Codex.ClientVersion) > 128 || strings.ContainsAny(a.Config.Codex.ClientVersion, "\r\n\x00")) {
+	if kind == "models" && !chatGPTDirectSource(src) && (a.Config.Codex.ClientVersion == "" || len(a.Config.Codex.ClientVersion) > 128 || strings.ContainsAny(a.Config.Codex.ClientVersion, "\r\n\x00")) {
 		return nil, &accountingError{Status: 422, Field: "client_version", Message: "先配置实际声明的 Codex 客户端版本，不能猜测版本"}
 	}
 	if state.Flights == nil {
@@ -312,6 +319,9 @@ func (a *App) codexObservationGET(ctx context.Context, state *quotaObservationSt
 		cache := codexCatalogCache{}
 		if f.Kind == "models" {
 			address = "https://chatgpt.com/backend-api/codex/models?client_version=" + url.QueryEscape(f.Config.Codex.ClientVersion)
+			if chatGPTDirectSource(src) {
+				address = chatGPTResource + "/models"
+			}
 			b, _ := json.Marshal(f.Source.Quota["codex_model_catalog"])
 			_ = json.Unmarshal(b, &cache)
 		}
@@ -320,7 +330,9 @@ func (a *App) codexObservationGET(ctx context.Context, state *quotaObservationSt
 			return nil, nil, 0, errors.New("观测请求初始化失败")
 		}
 		req.Header.Set("Authorization", "Bearer "+c.Access)
-		req.Header.Set("ChatGPT-Account-Id", c.Account)
+		if !chatGPTDirectSource(src) {
+			req.Header.Set("ChatGPT-Account-Id", c.Account)
+		}
 		req.Header.Set("Accept", "application/json")
 		if cache.ETag != "" && cache.AccountGeneration == src.AccountGeneration && cache.SourceGeneration == src.Generation && cache.ClientVersion == f.Config.Codex.ClientVersion {
 			req.Header.Set("If-None-Match", cache.ETag)
@@ -408,7 +420,7 @@ func codexRedactObservation(raw []byte, secrets []string) []byte {
 	return b
 }
 func sameQuotaOwner(old, current Source) bool {
-	return !current.Deleted && old.ID == current.ID && old.AccountID == current.AccountID && old.Generation == current.Generation && old.AccountGeneration == current.AccountGeneration && old.Version == current.Version && fixedCodexObservationSource(current)
+	return !current.Deleted && old.ID == current.ID && old.AccountID == current.AccountID && old.Generation == current.Generation && old.AccountGeneration == current.AccountGeneration && old.Version == current.Version && old.BaseURL == current.BaseURL && (fixedCodexObservationSource(current) || chatGPTDirectSource(current))
 }
 func codexObservationError(status int, err error) string {
 	switch status {
@@ -797,6 +809,7 @@ func parseCodexCatalog(raw []byte, version string, src Source) ([]codexCatalogMo
 	var data struct {
 		Models []struct {
 			Slug       string   `json:"slug"`
+			Visibility string   `json:"visibility"`
 			Name       string   `json:"display_name"`
 			Context    *int64   `json:"context_window"`
 			MaxContext *int64   `json:"max_context_window"`
@@ -814,6 +827,9 @@ func parseCodexCatalog(raw []byte, version string, src Source) ([]codexCatalogMo
 	items := []codexCatalogModel{}
 	seen := map[string]bool{}
 	for _, m := range data.Models {
+		if chatGPTDirectSource(src) && m.Visibility != "list" {
+			continue
+		}
 		if !quotaLabel(m.Slug, 200) || strings.Contains(m.Slug, "[redacted]") || seen[m.Slug] || len(m.Name) > 512 || strings.ContainsAny(m.Name, "\r\n\x00") {
 			return nil, errors.New("Codex 目录模型 ID 无效或重复")
 		}
@@ -839,6 +855,9 @@ func parseCodexCatalog(raw []byte, version string, src Source) ([]codexCatalogMo
 			reasoning = append(reasoning, level.Effort)
 		}
 		items = append(items, codexCatalogModel{ID: m.Slug, Name: m.Name, Context: m.Context, Output: m.Output, Metadata: codexCatalogMetadata{MaxContextWindow: m.MaxContext, InputModalities: m.Modalities, ReasoningLevels: reasoning, SupportedInAPI: m.Supported, AdapterVersion: codexObservationAdapter, ClientVersion: version, SourceGeneration: src.Generation, AccountGeneration: src.AccountGeneration}})
+		if chatGPTDirectSource(src) {
+			items[len(items)-1].Metadata.AdapterVersion = "chatgpt-direct"
+		}
 	}
 	return items, nil
 }
@@ -867,7 +886,7 @@ func (a *App) publishCodexCatalogLocked(src Source, items []codexCatalogModel, e
 			return err
 		}
 		seen := map[string]bool{}
-		for _, item := range items {
+		for order, item := range items {
 			seen[item.ID] = true
 			m := models[item.ID]
 			if m.ID == "" {
@@ -876,6 +895,9 @@ func (a *App) publishCodexCatalogLocked(src Source, items []codexCatalogModel, e
 				m.Version++
 			}
 			m.DiscoveredAt = &now
+			if chatGPTDirectSource(src) {
+				m.CatalogOrder = &order
+			}
 			if m.MetadataReason == "" || m.MetadataReason == "provider discovery" || m.MetadataReason == "codex provider discovery" {
 				m.ContextLimit = item.Context
 				m.MaxOutput = item.Output

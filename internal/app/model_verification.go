@@ -168,6 +168,9 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 	}
 	if len(in.Features) == 0 {
 		in.Features = []string{"text_json"}
+		if in.Protocol == "responses" && src.Kind == "codex_subscription" {
+			in.Features = []string{"text_sse"}
+		}
 	}
 	if len(in.Features) > 4 {
 		fail(w, 400, "一次验证最多4项", "features")
@@ -183,6 +186,10 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 		seen[feature] = true
 		if feature != "text_json" && feature != "text_sse" && feature != "continuation" && feature != "background" {
 			fail(w, 422, "此功能尚无可核验的测试动作，请使用该原生操作的独立测试", "features")
+			return
+		}
+		if feature == "text_json" && in.Protocol == "responses" && src.Kind == "codex_subscription" {
+			fail(w, 422, "订阅来源的原生 Responses 仅支持流式文本，请选择 text_sse", "features")
 			return
 		}
 		if feature == "continuation" && (in.Protocol != "responses" || src.NativeProtocol != "responses" || src.Kind != "api_key") {
@@ -218,6 +225,7 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 				record, passed, err := a.verifyBackground(ctx, src, model, backgroundKey)
 				if record != nil {
 					result.RequestIDs = append(result.RequestIDs, record.ID)
+					result.AccountGeneration = record.AccountGeneration
 				}
 				if err != nil && ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -228,7 +236,7 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 				results = append(results, result)
 				continue
 			}
-			body := map[string]any{"model": model.UpstreamModel, "input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with exactly OK."}}}}, "stream": feature == "text_sse" || src.Kind == "codex_subscription"}
+			body := map[string]any{"model": model.UpstreamModel, "input": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with exactly OK."}}}}, "stream": feature == "text_sse"}
 			if src.NativeProtocol == "messages" {
 				body["max_output_tokens"] = 32
 			}
@@ -255,10 +263,11 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 			record := run()
 			if record != nil {
 				result.RequestIDs = append(result.RequestIDs, record.ID)
+				result.AccountGeneration = record.AccountGeneration
 			}
 			passed := record != nil && record.Status == "succeeded" && record.DeliveryStatus == "completed"
 			if feature == "text_json" || feature == "text_sse" {
-				if feature == "text_sse" || src.Kind == "codex_subscription" {
+				if feature == "text_sse" {
 					passed = passed && verificationStreamText(sink.body.Bytes(), protocol)
 				} else {
 					passed = passed && verificationText(sink.body.Bytes(), protocol)
@@ -272,6 +281,9 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 					record = run()
 					if record != nil {
 						result.RequestIDs = append(result.RequestIDs, record.ID)
+						if record.AccountGeneration != result.AccountGeneration {
+							return nil, errors.New("验证期间配置已改变，旧结果保留于请求记录，请重新验证")
+						}
 					}
 					passed = record != nil && record.Status == "succeeded"
 				}
@@ -288,8 +300,13 @@ func (a *App) verifyModelAPI(w http.ResponseWriter, r *http.Request, modelID str
 		if err != nil || me != nil {
 			return nil, storageError()
 		}
-		if current.Deleted || current.Version != src.Version || current.Generation != src.Generation || current.AccountGeneration != src.AccountGeneration || latest.Version != model.Version {
+		if current.Deleted || current.Version != src.Version || current.Generation != src.Generation || latest.Version != model.Version {
 			return nil, errors.New("验证期间配置已改变，旧结果保留于请求记录，请重新验证")
+		}
+		for _, result := range results {
+			if result.AccountGeneration != current.AccountGeneration {
+				return nil, errors.New("验证期间配置已改变，旧结果保留于请求记录，请重新验证")
+			}
 		}
 		latest.Verification = "passed"
 		sourceChanged := false

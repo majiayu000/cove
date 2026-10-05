@@ -9,13 +9,27 @@ import (
 	"strings"
 )
 
-// A beta is forwarded only on native Messages with an explicit model capability.
-func validateMessagesBeta(header string, native bool, model SourceModel) error {
+// Native Messages forwards declared betas. Subscription conversion only accepts
+// the observed Claude Code attribution and the two explicitly mapped features.
+func validateMessagesBeta(header string, native bool, model SourceModel, src Source, adapter *compatOutput) error {
 	if header == "" {
 		return nil
 	}
 	if !native {
-		return errors.New("Anthropic beta 功能不能跨协议转换")
+		if src.Kind != "codex_subscription" || !src.AllowParameterAdjustment || adapter == nil {
+			return errors.New("Anthropic beta 功能不能跨协议转换；订阅文本转换需来源允许参数调整")
+		}
+		for _, beta := range strings.Split(header, ",") {
+			switch strings.TrimSpace(beta) {
+			case "claude-code-20250219", "effort-2025-11-24", "mid-conversation-system-2026-04-07":
+				// The strict body converter rejects thinking, caching, context
+				// management, scoped system blocks and other unmapped semantics.
+			default:
+				return errors.New("此 Anthropic beta 尚无跨协议转换合同；请关闭该功能或使用声明支持它的原生 Messages 来源")
+			}
+		}
+		adapter.adjustments = append(adapter.adjustments, "anthropic_beta_not_forwarded")
+		return nil
 	}
 	for _, beta := range strings.Split(header, ",") {
 		if !slices.Contains(model.Features, "anthropic_beta:"+strings.TrimSpace(beta)) {

@@ -17,8 +17,12 @@ import (
 
 // Trust discovery only at the configured authorization origin. Claims are not
 // used as identity until the signature, issuer, audience, expiry and nonce pass.
-func (a *App) verifiedIdentity(ctx context.Context, token, nonce string) (string, string, error) {
+func (a *App) verifiedIdentity(ctx context.Context, token, nonce string, registeredClient ...string) (string, string, error) {
 	invalid := errors.New("授权身份验证失败，请重新登录")
+	clientID := a.Config.Codex.ClientID
+	if len(registeredClient) > 0 {
+		clientID = registeredClient[0]
+	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return "", "", invalid
@@ -56,7 +60,7 @@ func (a *App) verifiedIdentity(ctx context.Context, token, nonce string) (string
 		return "", "", invalid
 	}
 	now := time.Now().Unix()
-	if claims.Subject == "" || claims.Auth.Account == "" || claims.Expires <= now || claims.Issued > now+30 || claims.NotBefore > now+30 || strings.TrimRight(claims.Issuer, "/") != strings.TrimRight(a.Config.Codex.AuthBaseURL, "/") {
+	if claims.Subject == "" || len(registeredClient) == 0 && claims.Auth.Account == "" || claims.Expires <= now || claims.Issued > now+30 || claims.NotBefore > now+30 || strings.TrimRight(claims.Issuer, "/") != strings.TrimRight(a.Config.Codex.AuthBaseURL, "/") {
 		return "", "", invalid
 	}
 	var audiences []string
@@ -68,11 +72,11 @@ func (a *App) verifiedIdentity(ctx context.Context, token, nonce string) (string
 	}
 	matched := false
 	for _, value := range audiences {
-		if value == a.Config.Codex.ClientID {
+		if value == clientID {
 			matched = true
 		}
 	}
-	if !matched || len(audiences) > 1 && claims.AuthorizedParty != a.Config.Codex.ClientID || claims.AuthorizedParty != "" && claims.AuthorizedParty != a.Config.Codex.ClientID {
+	if !matched || len(audiences) > 1 && claims.AuthorizedParty != clientID || claims.AuthorizedParty != "" && claims.AuthorizedParty != clientID {
 		return "", "", invalid
 	}
 	if nonce != "" && subtle.ConstantTimeCompare([]byte(nonce), []byte(claims.Nonce)) != 1 {
@@ -111,6 +115,9 @@ func (a *App) verifiedIdentity(ctx context.Context, token, nonce string) (string
 		}
 		pub := &rsa.PublicKey{N: modulus, E: int(exponent.Int64())}
 		if rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], signature) == nil {
+			if len(registeredClient) > 0 {
+				return clientID, claims.Subject, nil
+			}
 			return claims.Auth.Account, claims.Subject, nil
 		}
 	}

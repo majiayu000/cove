@@ -98,6 +98,34 @@ func TestSpecModelVerificationRejectsUnavailableFeaturesAndEmptyOutput(t *testin
 	}
 }
 
+func TestSpecModelVerificationSubscriptionJSONDoesNotBecomeStream(t *testing.T) {
+	var calls atomic.Int32
+	a := contractApp(t, func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return contractResponse(compatDoneWire(), "text/event-stream"), nil
+	})
+	a.Config.DataDir = t.TempDir()
+	src, _ := a.Store.source("source")
+	src.Kind, src.AuthStatus = "codex_subscription", "logged_in"
+	if err := a.Store.saveSource(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Secrets.Put(src.CredentialRef, encode(Credential{Access: "synthetic", Account: "account", Expires: time.Now().Add(time.Hour)})); err != nil {
+		t.Fatal(err)
+	}
+	src, _ = a.Store.source("source")
+	models, _ := a.Store.models("source")
+	w := lifecycleAdmin(a, "POST", "/admin/models/"+models[0].ID+"/verify", encode(map[string]any{"expected_source_generation": src.Generation, "protocol": "responses", "features": []string{"text_json"}}), "")
+	a.ownedTasks.Wait()
+	if w.Code != 422 || calls.Load() != 0 {
+		t.Fatalf("JSON verification substituted a stream: HTTP %d, upstream calls %d", w.Code, calls.Load())
+	}
+	model, _ := a.Store.model(models[0].ID)
+	if len(model.VerificationResults) != 0 {
+		t.Fatal("unsupported JSON verification published capability evidence")
+	}
+}
+
 func TestSpecModelVerificationSubscriptionRequiresActualText(t *testing.T) {
 	for _, protocol := range []string{"responses", "chat_completions", "messages"} {
 		for _, fixture := range []struct {
@@ -133,7 +161,11 @@ func TestSpecModelVerificationSubscriptionRequiresActualText(t *testing.T) {
 				}
 				src, _ = a.Store.source("source")
 				models, _ := a.Store.models("source")
-				w := lifecycleAdmin(a, "POST", "/admin/models/"+models[0].ID+"/verify", encode(map[string]any{"expected_source_generation": src.Generation, "protocol": protocol, "features": []string{"text_json", "text_sse"}}), "")
+				features := []string{"text_json", "text_sse"}
+				if protocol == "responses" {
+					features = []string{"text_sse"}
+				}
+				w := lifecycleAdmin(a, "POST", "/admin/models/"+models[0].ID+"/verify", encode(map[string]any{"expected_source_generation": src.Generation, "protocol": protocol, "features": features}), "")
 				op := operationDone(t, a, w)
 				if op.State != "succeeded" {
 					t.Fatal(op.Error)
@@ -143,7 +175,7 @@ func TestSpecModelVerificationSubscriptionRequiresActualText(t *testing.T) {
 				if fixture.text {
 					expected = "passed"
 				}
-				if calls.Load() != 2 || model.Verification != expected || len(model.VerificationResults) != 2 {
+				if calls.Load() != int32(len(features)) || model.Verification != expected || len(model.VerificationResults) != len(features) {
 					t.Fatalf("text verification claimed wrong evidence: %+v", model.VerificationResults)
 				}
 				for _, result := range model.VerificationResults {
@@ -151,7 +183,7 @@ func TestSpecModelVerificationSubscriptionRequiresActualText(t *testing.T) {
 						t.Fatalf("%s verified without actual text: %s", result.Feature, result.Status)
 					}
 				}
-				records := waitRecords(t, a, 2)
+				records := waitRecords(t, a, len(features))
 				for _, record := range records {
 					if record.Origin != "verification" || record.Status != "succeeded" {
 						t.Fatalf("verification or accounting contract changed: %+v", record)
@@ -159,5 +191,128 @@ func TestSpecModelVerificationSubscriptionRequiresActualText(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSpecModelVerificationCredentialGeneration(t *testing.T) {
+	for _, scenario := range []string{"expired_refresh", "credential_changed_after_dispatch", "mixed_generations", "source_changed_after_dispatch"} {
+		t.Run(scenario, func(t *testing.T) {
+			var refreshes, calls atomic.Int32
+			var a *App
+			a = contractApp(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/oauth/token" {
+					refreshes.Add(1)
+					return contractResponse(encode(map[string]any{"access_token": "fresh", "refresh_token": "rotated", "id_token": fakeJWT("account", "subject"), "expires_in": 3600}), "application/json"), nil
+				}
+				if calls.Add(1) == 1 && scenario != "expired_refresh" {
+					a.mu.Lock()
+					defer a.mu.Unlock()
+					src, err := a.Store.source("source")
+					if err != nil {
+						return nil, err
+					}
+					switch scenario {
+					case "credential_changed_after_dispatch":
+						err = a.replaceCredential(&src, encode(Credential{Access: "replacement", Refresh: "replacement-refresh", Account: "account", Subject: "subject", Expires: time.Now().Add(time.Hour)}), true)
+					case "mixed_generations":
+						// Synthetic expiry between two probes: the first record keeps
+						// its generation while the next probe refreshes normally.
+						err = a.Secrets.Put(src.CredentialRef, encode(Credential{Access: "expired", Refresh: "refresh-old", Account: "account", Subject: "subject", Expires: time.Now().Add(-time.Hour)}))
+					case "source_changed_after_dispatch":
+						src.Version++
+						err = a.Store.saveSource(src)
+					}
+					if err != nil {
+						return nil, err
+					}
+				}
+				return contractResponse(compatDoneWire(), "text/event-stream"), nil
+			})
+			a.Config.DataDir = t.TempDir()
+			expiredContractSource(t, a)
+			src, err := a.Store.source("source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src.AllowParameterAdjustment = true
+			if err = a.Store.saveSource(src); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "mixed_generations" {
+				if err = a.Secrets.Put(src.CredentialRef, encode(Credential{Access: "synthetic", Refresh: "refresh-old", Account: "account", Subject: "subject", Expires: time.Now().Add(time.Hour)})); err != nil {
+					t.Fatal(err)
+				}
+			}
+			models, err := a.Store.models(src.ID)
+			if err != nil || len(models) != 1 {
+				t.Fatal("missing model fixture", err)
+			}
+			features := []string{"text_sse"}
+			if scenario == "mixed_generations" {
+				features = []string{"text_json", "text_sse"}
+			}
+			w := lifecycleAdmin(a, "POST", "/admin/models/"+models[0].ID+"/verify", encode(map[string]any{"expected_source_generation": src.Generation, "protocol": "chat_completions", "features": features}), "")
+			op := operationDone(t, a, w)
+			model, err := a.Store.model(models[0].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records := waitRecords(t, a, len(features))
+			if refreshes.Load() != 1 || calls.Load() != int32(len(features)) {
+				t.Fatalf("unexpected replay: refreshes=%d, generations=%d", refreshes.Load(), calls.Load())
+			}
+			for _, record := range records {
+				if record.Status != "succeeded" || record.DeliveryStatus != "completed" {
+					t.Fatalf("probe did not complete: %s/%s", record.Status, record.DeliveryStatus)
+				}
+			}
+			if scenario != "expired_refresh" {
+				if op.State != "failed" || op.Error != "验证期间配置已改变，旧结果保留于请求记录，请重新验证" || len(model.VerificationResults) != 0 {
+					t.Fatalf("stale proof was published: operation=%s/%s, results=%d", op.State, op.Error, len(model.VerificationResults))
+				}
+				return
+			}
+			current, err := a.Store.source(src.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op.State != "succeeded" || model.Verification != "passed" || len(model.VerificationResults) != 1 {
+				t.Fatalf("normal refresh discarded completed verification: %s/%s", op.State, op.Error)
+			}
+			result := model.VerificationResults[0]
+			if result.AccountGeneration != current.AccountGeneration || result.AccountGeneration != records[0].AccountGeneration || result.AccountGeneration <= src.AccountGeneration || current.Generation != src.Generation || current.Version != src.Version {
+				t.Fatal("verification did not retain the actual dispatch credential generation")
+			}
+		})
+	}
+}
+
+func TestSpecSourceCreationHonorsEnabled(t *testing.T) {
+	enabled, disabled := true, false
+	for _, test := range []struct {
+		name    string
+		enabled *bool
+		want    bool
+	}{{"default", nil, true}, {"disabled_draft", &disabled, false}, {"enabled", &enabled, true}} {
+		t.Run(test.name, func(t *testing.T) {
+			a := contractApp(t, nil)
+			src, err := a.Store.source("source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := map[string]any{"name": "Creation state fixture", "account_id": src.AccountID, "kind": src.Kind, "provider": src.Provider, "base_url": "https://upstream.invalid/v1", "models": []string{}}
+			if test.enabled != nil {
+				body["enabled"] = *test.enabled
+			}
+			w := lifecycleAdmin(a, "POST", "/admin/sources", encode(body), "")
+			var created Source
+			if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &created) != nil {
+				t.Fatalf("source creation failed: HTTP %d", w.Code)
+			}
+			persisted, err := a.Store.source(created.ID)
+			if err != nil || created.Enabled != test.want || persisted.Enabled != test.want {
+				t.Fatalf("source enabled state ignored: response=%t persisted=%t want=%t err=%v", created.Enabled, persisted.Enabled, test.want, err)
+			}
+		})
 	}
 }

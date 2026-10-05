@@ -39,4 +39,6 @@ make check
 make package
 ```
 
-包为本机原生开发产物，构建证据记录源码、Go/Node/npm 版本、平台、嵌入前端和文件 SHA-256。项目使用 [MIT License](LICENSE)。当前产物为开发包；正式签名和跨平台发行验收另行记录。
+包为本机原生开发产物，构建证据记录源码、Go/Node/npm 版本、平台、嵌入前端和文件 SHA-256。项目使用 [MIT License](LICENSE)。macOS arm64 签名公证产物及具体构建验收见 [本轮执行汇总](test-results/completion-20261005-full/execution.json)；干净机器和其他平台安装仍单独待验。
+
+企业部署已扩展为可选的单服务器多租户模式：独立登录、角色权限、租户目录及预算隔离，详见 [企业部署](docs/enterprise.md)。个人桌面配置保持默认，企业模式使用单独配置和数据目录。

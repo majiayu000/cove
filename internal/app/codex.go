@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -12,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -29,24 +32,106 @@ type Login struct {
 	generation        int
 	accountGeneration int
 	nonce             string
+	clientID          string
+	direct            bool
 	pending           *Credential
 	state             string
 	verifier          string
 	cancel            context.CancelFunc
 }
 type Credential struct {
-	Access  string    `json:"access_token"`
-	Refresh string    `json:"refresh_token"`
-	IDToken string    `json:"id_token"`
-	Expires time.Time `json:"expires_at"`
-	Account string    `json:"account"`
-	Subject string    `json:"subject"`
+	Access   string    `json:"access_token"`
+	Refresh  string    `json:"refresh_token"`
+	IDToken  string    `json:"id_token"`
+	Expires  time.Time `json:"expires_at"`
+	Account  string    `json:"account"`
+	Subject  string    `json:"subject"`
+	ClientID string    `json:"client_id,omitempty"`
+	Scopes   []string  `json:"scopes,omitempty"`
 }
 type tokenResponse struct {
 	Access  string `json:"access_token"`
 	Refresh string `json:"refresh_token"`
 	IDToken string `json:"id_token"`
 	Expires int64  `json:"expires_in"`
+	Scope   string `json:"scope"`
+}
+
+const chatGPTResource = "https://api.openai.com/v1"
+const chatGPTDirectScope = "chatgpt.tokens.use.direct"
+
+// Host and issued client IDs survive local logout. They are not bearer credentials.
+// Caller holds mu, so first creation is serialized with other login attempts.
+func (a *App) chatGPTRegistration(account string) (string, string, error) {
+	host, err := a.Secrets.Get("chatgpt-host-id")
+	if errors.Is(err, os.ErrNotExist) {
+		var uuid [16]byte
+		if _, err = rand.Read(uuid[:]); err != nil {
+			return "", "", err
+		}
+		uuid[6], uuid[8] = (uuid[6]&0x0f)|0x40, (uuid[8]&0x3f)|0x80
+		host = fmt.Sprintf("urn:uuid:%x-%x-%x-%x-%x", uuid[:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:])
+		err = a.Secrets.Put("chatgpt-host-id", host)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	client, err := a.Secrets.Get("chatgpt-client-" + account)
+	if errors.Is(err, os.ErrNotExist) {
+		return host, "dynamic_agent_client", nil
+	}
+	return host, client, err
+}
+
+// Caller has already stopped local use and holds mu. Tokens remain private until
+// the bounded revocation attempt finishes; a failure never claims remote logout.
+func (a *App) revokeChatGPTSessionLocked(ctx context.Context, src Source, ref string) string {
+	if !chatGPTDirectSource(src) || ref == "" {
+		return "unknown"
+	}
+	raw, err := a.Secrets.Get(ref)
+	var credential Credential
+	if err != nil || json.Unmarshal([]byte(raw), &credential) != nil || credential.ClientID == "" || credential.Refresh == "" {
+		return "unknown"
+	}
+	a.mu.Unlock()
+	defer a.mu.Lock()
+	ctx, cancel := context.WithTimeout(sourceNetwork(ctx, src), 6*time.Second)
+	defer cancel()
+	var metadata struct {
+		Issuer string `json:"issuer"`
+		Revoke string `json:"revocation_endpoint"`
+	}
+	if a.identityDocument(ctx, safeEndpoint(a.Config.Codex.AuthBaseURL, "/.well-known/openid-configuration"), &metadata) != nil || strings.TrimRight(metadata.Issuer, "/") != strings.TrimRight(a.Config.Codex.AuthBaseURL, "/") || metadata.Revoke == "" || origin(metadata.Revoke) != origin(a.Config.Codex.AuthBaseURL) {
+		return "unknown"
+	}
+	values := url.Values{"token": {credential.Refresh}, "token_type_hint": {"refresh_token"}, "client_id": {credential.ClientID}}
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", metadata.Revoke, strings.NewReader(values.Encode()))
+		if err != nil {
+			return "unknown"
+		}
+		req.GetBody = nil
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := a.doUpstream(req, src)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return "confirmed"
+			}
+			if resp.StatusCode < 500 {
+				return "unknown"
+			}
+		}
+		if attempt == 0 {
+			select {
+			case <-ctx.Done():
+				return "unknown"
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	return "unknown"
 }
 
 func (a *App) loginOwner(source string) string {
@@ -122,10 +207,35 @@ func (a *App) loginAPI(w http.ResponseWriter, r *http.Request, src Source) {
 		fail(w, 409, "请先结束该来源的运行请求", "")
 		return
 	}
+	if sources, err := a.Store.sources(); err != nil {
+		fail(w, 503, "来源账号绑定不可读", "")
+		return
+	} else {
+		for _, other := range sources {
+			if other.AccountID == src.AccountID && !other.Deleted && chatGPTDirectSource(other) != chatGPTDirectSource(src) {
+				fail(w, 409, "ChatGPT 独立注册须使用独立账号记录，不能替换 Codex 私有来源共享的凭据", "account_id")
+				return
+			}
+		}
+	}
 	callback, e := url.Parse(a.Config.Codex.RedirectURI)
 	if e != nil || callback.Scheme != "http" || callback.Hostname() != "localhost" && callback.Hostname() != "127.0.0.1" || callback.Port() == "" || callback.Path != "/auth/callback" {
 		fail(w, 503, "OAuth 本机回调配置无效", "")
 		return
+	}
+	clientID, hostID := a.Config.Codex.ClientID, ""
+	direct := chatGPTDirectSource(src)
+	if direct {
+		if callback.Hostname() != "127.0.0.1" || strings.TrimRight(src.BaseURL, "/") != chatGPTResource {
+			fail(w, 503, "ChatGPT 独立授权要求 127.0.0.1 回调和公开 API 来源", "")
+			return
+		}
+		var err error
+		hostID, clientID, err = a.chatGPTRegistration(src.AccountID)
+		if err != nil {
+			fail(w, 503, "独立授权注册记录不可读写", "")
+			return
+		}
 	}
 	listener, e := net.Listen("tcp", net.JoinHostPort("127.0.0.1", callback.Port()))
 	if e != nil {
@@ -146,8 +256,16 @@ func (a *App) loginAPI(w http.ResponseWriter, r *http.Request, src Source) {
 	hash := sha256.Sum256([]byte(verifier))
 	params := url.Values{"client_id": {a.Config.Codex.ClientID}, "response_type": {"code"}, "redirect_uri": {a.Config.Codex.RedirectURI}, "scope": {"openid email profile offline_access"}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(hash[:])}, "code_challenge_method": {"S256"}, "prompt": {"login"}, "id_token_add_organizations": {"true"}, "codex_cli_simplified_flow": {"true"}}
 	params.Set("nonce", nonce)
+	authorizePath := "/oauth/authorize"
+	if direct {
+		authorizePath = "/api/accounts/authorize"
+		params = url.Values{"client_id": {clientID}, "response_type": {"code"}, "redirect_uri": {a.Config.Codex.RedirectURI}, "scope": {"openid profile email offline_access resource.invoke " + chatGPTDirectScope}, "resource": {chatGPTResource}, "state": {state}, "nonce": {nonce}, "code_challenge": {base64.RawURLEncoding.EncodeToString(hash[:])}, "code_challenge_method": {"S256"}, "ext_agent_host_id": {hostID}}
+		if clientID == "dynamic_agent_client" {
+			params.Set("agent_name_hint", "Cove")
+		}
+	}
 	ctx, cancel := context.WithTimeout(sourceNetwork(context.Background(), src), 10*time.Minute)
-	op := &Login{ID: id("login"), Method: "browser_oauth", AuthorizationURL: safeEndpoint(a.Config.Codex.AuthBaseURL, "/oauth/authorize") + "?" + params.Encode(), Expires: time.Now().UTC().Add(10 * time.Minute), Status: "pending", state: state, verifier: verifier, nonce: nonce, version: src.Version, generation: src.Generation, accountGeneration: src.AccountGeneration, cancel: cancel}
+	op := &Login{ID: id("login"), Method: "browser_oauth", AuthorizationURL: safeEndpoint(a.Config.Codex.AuthBaseURL, authorizePath) + "?" + params.Encode(), Expires: time.Now().UTC().Add(10 * time.Minute), Status: "pending", state: state, verifier: verifier, nonce: nonce, clientID: clientID, direct: direct, version: src.Version, generation: src.Generation, accountGeneration: src.AccountGeneration, cancel: cancel}
 	a.logins[src.AccountID] = op
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 40 * time.Second}
 	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { a.oauthCallback(w, r, ctx, src.ID, op, callback) })
@@ -229,13 +347,43 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request, ctx context.
 		return
 	}
 	verifier, nonce := op.verifier, op.nonce
+	if op.direct {
+		issued := r.URL.Query().Get("client_id")
+		if op.clientID == "dynamic_agent_client" {
+			if issued == "" || issued == "dynamic_agent_client" || len(issued) > 256 || strings.ContainsAny(issued, "\r\n\x00") {
+				a.mu.Unlock()
+				http.Error(w, "Registration callback is missing an issued client ID. Return to Cove and retry.", 400)
+				return
+			}
+			src, err := a.Store.source(source)
+			if err != nil || src.Deleted || src.Version != op.version || src.Generation != op.generation || src.AccountGeneration != op.accountGeneration {
+				a.mu.Unlock()
+				http.Error(w, "Source changed. Return to Cove and retry.", 409)
+				return
+			}
+			if a.Secrets.Put("chatgpt-client-"+src.AccountID, issued) != nil {
+				a.mu.Unlock()
+				http.Error(w, "Registration could not be saved. Return to Cove and retry.", 503)
+				return
+			}
+			op.clientID = issued
+		} else if issued != "" && issued != op.clientID {
+			a.mu.Unlock()
+			http.Error(w, "Registration changed. Return to Cove and retry.", 400)
+			return
+		}
+	}
 	op.Status = "exchanging"
 	op.AuthorizationURL = ""
 	op.state = ""
 	op.verifier = ""
 	op.nonce = ""
 	a.mu.Unlock()
-	credential, err := a.exchange(ctx, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {verifier}, "redirect_uri": {a.Config.Codex.RedirectURI}}, nonce)
+	values := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {verifier}, "redirect_uri": {a.Config.Codex.RedirectURI}, "client_id": {op.clientID}}
+	if op.direct {
+		values.Set("resource", chatGPTResource)
+	}
+	credential, err := a.exchange(ctx, values, nonce)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	defer func() {
@@ -251,7 +399,7 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request, ctx context.
 	if err == nil && (e != nil || src.Deleted || a.stopping || a.accountActive[src.AccountID] > 0 || src.Version != op.version || src.Generation != op.generation || src.AccountGeneration != op.accountGeneration) {
 		err = errors.New("来源状态已变化，请结束调用后重新登录")
 	}
-	if err == nil && src.Configured {
+	if err == nil && src.Configured && !op.direct {
 		raw, readErr := a.Secrets.Get(src.CredentialRef)
 		var old Credential
 		if readErr != nil || json.Unmarshal([]byte(raw), &old) != nil || old.Account != credential.Account || old.Subject != credential.Subject {
@@ -261,6 +409,16 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request, ctx context.
 			op.pending = &credential
 			oauthResult(w, "授权已收到。请回到原 Cove 页面，确认是否更换来源账号。")
 			return
+		}
+	}
+	if err == nil && op.direct {
+		previous, readErr := a.Secrets.Get("chatgpt-subject-" + src.AccountID)
+		if readErr == nil && previous != credential.Subject {
+			err = errors.New("独立注册返回不同身份，请为新账号建立独立来源")
+		} else if errors.Is(readErr, os.ErrNotExist) {
+			err = a.Secrets.Put("chatgpt-subject-"+src.AccountID, credential.Subject)
+		} else if readErr != nil {
+			err = readErr
 		}
 	}
 	if err == nil {
@@ -279,6 +437,9 @@ func (a *App) oauthCallback(w http.ResponseWriter, r *http.Request, ctx context.
 	} else {
 		op.Status = "succeeded"
 		op.Message = "已登录，调用尚未验证"
+		if credential.ClientID != "" && !slices.Contains(credential.Scopes, chatGPTDirectScope) {
+			op.Message = "身份已登录，ChatGPT 计划使用未授权；不能调用模型"
+		}
 	}
 	oauthResult(w, op.Message+"。请回到原 Cove 页面，随后可关闭此窗口。")
 }
@@ -343,8 +504,19 @@ func (a *App) confirmLogin(w http.ResponseWriter, r *http.Request, src Source) {
 func (a *App) exchange(ctx context.Context, values url.Values, expectedNonce ...string) (Credential, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	values.Set("client_id", a.Config.Codex.ClientID)
-	req, err := http.NewRequestWithContext(ctx, "POST", safeEndpoint(a.Config.Codex.AuthBaseURL, "/oauth/token"), strings.NewReader(values.Encode()))
+	if values.Get("client_id") == "" {
+		values.Set("client_id", a.Config.Codex.ClientID)
+	}
+	tokenPath := "/oauth/token"
+	direct := values.Get("resource") == chatGPTResource
+	if direct {
+		if values.Get("client_id") == "dynamic_agent_client" {
+			return Credential{}, errors.New("独立注册尚未签发客户端 ID，请重新登录")
+		}
+		tokenPath = "/api/accounts/oauth/token"
+		values.Set("resource", chatGPTResource)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", safeEndpoint(a.Config.Codex.AuthBaseURL, tokenPath), strings.NewReader(values.Encode()))
 	if err != nil {
 		return Credential{}, errors.New("授权地址无效")
 	}
@@ -372,7 +544,12 @@ func (a *App) exchange(ctx context.Context, values url.Values, expectedNonce ...
 	if len(expectedNonce) > 0 {
 		nonce = expectedNonce[0]
 	}
-	c.Account, c.Subject, err = a.verifiedIdentity(ctx, t.IDToken, nonce)
+	if direct {
+		c.ClientID, c.Scopes = values.Get("client_id"), strings.Fields(t.Scope)
+		c.Account, c.Subject, err = a.verifiedIdentity(ctx, t.IDToken, nonce, c.ClientID)
+	} else {
+		c.Account, c.Subject, err = a.verifiedIdentity(ctx, t.IDToken, nonce)
+	}
 	if err != nil {
 		return Credential{}, err
 	}
@@ -430,6 +607,12 @@ func (a *App) subscriptionCredential(ctx context.Context, src *Source, rejectedA
 	if json.Unmarshal([]byte(raw), &c) != nil || c.Access == "" {
 		return c, errors.New("授权凭据不可读，请重新登录")
 	}
+	if chatGPTDirectSource(*src) != (c.ClientID != "") {
+		return c, errors.New("授权注册与来源端点不匹配；独立 ChatGPT 和 Codex 私有来源不能共享账号凭据")
+	}
+	if c.ClientID != "" && !slices.Contains(c.Scopes, chatGPTDirectScope) {
+		return c, errors.New("身份已登录，但 ChatGPT 计划使用未授权，请重新授权或选择 API 来源")
+	}
 	if time.Until(c.Expires) > time.Minute && !(len(rejectedAccess) > 0 && rejectedAccess[0] == c.Access) {
 		return c, nil
 	}
@@ -452,9 +635,17 @@ func (a *App) subscriptionCredential(ctx context.Context, src *Source, rejectedA
 		defer a.ownedTasks.Done()
 		defer cancel()
 		defer release()
-		fresh, err := a.exchange(refreshCtx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {c.Refresh}})
+		values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {c.Refresh}}
+		if c.ClientID != "" {
+			values.Set("client_id", c.ClientID)
+			values.Set("resource", chatGPTResource)
+		}
+		fresh, err := a.exchange(refreshCtx, values)
 		if err == nil && (fresh.Account != c.Account || fresh.Subject != c.Subject) {
 			err = errors.New("刷新后的账号身份变化，请重新登录绑定")
+		}
+		if err == nil && c.ClientID != "" && !slices.Contains(fresh.Scopes, chatGPTDirectScope) {
+			err = errors.New("刷新结果未授予 ChatGPT 计划使用权限，请重新授权")
 		}
 		a.mu.Lock()
 		defer a.mu.Unlock()

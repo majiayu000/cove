@@ -1,4 +1,68 @@
+## 2026-10-06 提交状态与后续验收
+
+本次提交包含单服务器企业多租户、客户端配置扩展、查询性能改进、Cove 自有 ChatGPT 授权和验证刷新修复。当前仍是开发预览；唯一完成台账为 [implementation-readiness.tsv](implementation-readiness.tsv)。源码和运维凭据分开，真实 Key、数据库、部署私有目录及验收原始文件不纳入提交。
+
+已验收的发布快照 `b8deb6363808…` 通过静态检查、前端类型检查和 5 项行为测试；macOS arm64 DMG 获 Apple `Accepted`（`1ba8f90d-2a31-4da9-b9b9-1f8cf576a307`），票据装订、Gatekeeper、30 个包内文件及原生启动通过。第二台物理 Mac 的包安装/重启 25 项和 launchd/受控进程崩溃恢复 20 项通过。大阪持久服务通过 23 项内网、40 项公网检查，现有管理员、租户和其他产品保留。之后的提交前改动仅更新本节、部署说明及台账，并清理一行尾空白；已发布包的 BuildID 不重写为提交后的文档快照。
+
+New API 真实验收属于 `474ddfe6d879…`：15 个目录标识中仅启用 `gpt-5.6-sol`，两次模型验证及四次公网生成通过，覆盖 JSON/Chat SSE、实际函数执行与第二轮结果、Responses SSE 转换，记录用量完整，临时 Key 已撤销。该快照的 1800 秒、8 路流、百万记录性能验收 7 项通过；附加 TTFT P95 1.352ms、第一页 P95 1.337ms、取消释放 0.059s。这是本机合成性能验收，不是大阪压力测试或提供方延迟测试。完整 Go race 的原快照 `bde2c86f8713…` 共 722 项含子用例通过、零跳过；其后 Go 源码未改变，最终修正限于前端显示和文档。各证据保留原 BuildID，读取 `test-results/continuation-20261005/execution.json`。
+
+后续按以下顺序推进，完成后更新同一台账的对应行：
+
+| 顺序 | 关联项 | 下一步与关闭条件 |
+| --- | --- | --- |
+| 1 | R086/R100、E08 | 推送审阅分支后执行仓库已有 macOS/Linux/Windows CI；原生安装、锁/权限、浏览器和服务生命周期仍需对应实机。2026-10-06 提交前复查 Windows 验收机 SSH 仍连接超时，未执行原生验收；需先恢复可连接状态。第二台 Mac 的局部验收不替代干净 OS、Finder、重启或断电实验。 |
+| 2 | R074/R075/R079/R098、D03/E07/E10 | 优先复用隔离宿主流程验证 Continue 的 GUI 与工具模式，再逐版本补 Cline VS Code/Roo/Cursor 自动配置和 MCP/Skills 激活、实际工具回传及三方恢复；隔离目录执行，保留日常登录和用户后改字段。新增 secret 落点须单独获得用户批准。 |
+| 3 | R091—R097、D02/E09/E10 | 按实际来源能力选定媒体/文件/后台/compact/WS 的模型与操作，分别验证资源归属、工具历史、用量及取消；既有 New API 文本成功不能推导这些能力。缺可用提供方或当前账号资格时先取得必要输入，不派发盲测。 |
+| 4 | R028/R066、E03/E04/E06 | 取得与请求 ID/时间窗口对应的提供方价格与正式账单，核对金额、币种、缓存/推理/工具等维度；缺价或缺账单继续标记 pending，不能用 token 记录当作正式对账。 |
+| 5 | R018/R019/R097、D01/D02 | 逐供应商取得 Cove 独立授权、scope/redirect/身份与模型/额度/资源合同，再补真实账号验证；不借用其他客户端内置注册或订阅凭据。需要签署或接受供应商协议的最终操作由用户明确批准。 |
+
+## 2026-10-05 全功能收尾与单服务器企业扩展
+用户明确选择扩大 R099 到单服务器、多租户登录、权限和预算隔离。实现与部署步骤见 [企业部署](enterprise.md) 和 [独立规格](spec/04-ENTERPRISE-SINGLE-SERVER.md)。各租户复用既有网关和预算逻辑，使用独立数据库/凭据目录，远程入口不能获取个人桌面的自动管理会话，不能操作服务器上的客户端文件或借用 AWS profile/Google ADC。
+
+百万记录扩展测试发现不存在模型的筛选约1987ms；新模型索引使该类第一页约0.60ms，十类页面均通过300ms门槛。汇总查询增加覆盖索引，合并TTFT扫描并避免无筛选的重复ID集合，金额仍用精确十进制合并。基线与中间结果分别在 `completion-20261005-full/query-baseline.json` 与 `query-after.json`；最终结果必须读取同目录 `performance-final.json`，核对冻结 BuildID、8路1800秒与百万记录，不能从短时结果推导完成。
+
+客户端版本按独立只读进程并发检测，逐客户端超时及版本失败合同保持原值。模型、预算和客户端读取独立发布且保留迟到响应保护，慢 CLI 不再阻塞模型页；浏览器以阻塞客户端读取的场景验证该边界。企业登录在签发会话前重查用户版本和启用状态，防止密码修改或停用期间的旧验证结果重新签发会话。
+
+实际本机 Codex 宿主在隔离目录加载显式 Skill 与官方 MCP stdio 工具，实际执行3*4并将12送入下一轮请求。该上游是合成提供方；证据在 `codex-mcp-skill.log`，不宣称本人订阅或其他客户端已完成E10。测试清理临时目录，不读取日常客户端登录材料。
+
+企业真实HTTP/权限/隔离/重启/预算保留证据在 `enterprise-tests.log`，网页操作在 `enterprise-browser.json`；静态检查、完整race、SDK、最终性能、签名公证及实际包运行由同目录 `execution.json` 汇总，并保留各层原 BuildID。供应商准入、部分实际高级调用、IDE原生恢复、Windows及干净Mac实机、正式计费对账仍按各台账剩余栏记录。
+
+## 2026-10-05 Continue 宿主和 Cline CLI 功能验收
+
+Continue 1.3.40 已在真实 VS Code 1.140.0 扩展宿主读取 Cove 生产生成的配置、解析用户批准的临时 secret，并通过本人 Cove 自有 ChatGPT 来源完成两轮对话；每条请求均完成并有完整用量。订阅配置改为 Chat 路径，明确使用默认采样且不请求输出 token 硬上限，保留其他请求选项。验收调用官方扩展随包测试入口的真实 core 流程，覆盖宿主集成，未覆盖 GUI 输入及 agent/tool 等其他模式，见 [Continue 宿主报告](../test-results/completion-20261005-features/continue-ide.json)。临时 Key 已撤销并复查 401，临时 .env、配置及 VS Code 用户目录已删除。
+
+网页实测发现配置应用前的 CLI 版本复核偶发返回 409；独立读取同一官方 CLI 版本正常。Cline 检测时限调整为 8 秒，仍在应用边界复核版本和启动环境，无法确认时保持拒绝。最终网页选择、预览、应用和恢复结果见本次执行汇总。
+
+新增 Cline CLI 3.0.68 自动配置卡：所选独立数据目录、官方 version 1 providers.json、OPENAI_API_KEY 进程引用、版本及环境冲突阻止、CAS 与三方恢复。持久凭据优先于环境变量时阻止改写，其他 provider/login 和后改字段保留。未修改的官方 CLI 和 SDK 已实际读取配置，通过本人来源执行一次 printf 并准确回复；两条请求完成、用量完整，恢复删除本次新增 provider 并保留原登录，Key 未持久化到 CLI 文件。见 [Cline CLI 报告](../test-results/completion-20261005-features/cline-cli.json)。Cline VS Code、Roo、Cursor 的自动入口仍与 CLI 分开记录。
+
+最终源码检查、构建、本机运行和本次功能版本的签名公证结果统一记录在 [本次执行汇总](../test-results/completion-20261005-features/execution.json)，以实际 passed 和 BuildID 为准。以下公证及早期验收记录保留其原构建范围；不将旧冻结包标作新功能版本。仍缺其他供应商合同与凭据、其余 IDE 自动入口、Windows/干净 macOS 安装及未覆盖的真实高级协议验收，详见唯一[实施台账](implementation-readiness.tsv)。
+
+## 2026-10-05 macOS 冻结包签名公证完成
+
+复核 Codex 历史记录后，复用本机既有同团队 App Store Connect API 密钥配置 `cove-183`，无需另建 App 专用密码。冻结 BuildID `4937dc59de9b105b7fe34fd52ed5cfc485914a13a80ec9560754b8f69d55fdf5` 的 Ma JiaYu（C5UWZ934C2）签名 DMG 已获 Apple `Accepted`，提交 ID 为 `a98301a2-6c2b-4250-ab5d-6362bc1309ec`，Apple 日志无 issues；票据装订、票据校验、严格签名和 Gatekeeper 均通过。签名后的隔离原生启动、健康/就绪检查及包内 27 个文件哈希检查也通过。产物为 [macOS arm64 签名公证包](../bin/cove-signed-darwin-arm64-4937dc59de9b.dmg)，结果和最终 SHA-256 见 [公证验收报告](../test-results/completion-20261005-closeout/notarization-final.json)。
+
+公证覆盖上述冻结包及 BuildID；后续台账文档更新另行记录。干净机器安装、Windows 实机、其余供应商、客户端宿主和未覆盖真实协议实验继续保留在实施台账。
+
+## 2026-10-05 剩余接入与真实客户端收尾
+
+Claude Code 2.1.281已读取Cove实际生成的隔离配置，经本人订阅完成两轮请求、一次Bash printf及准确最终输出。metadata.user_id省略、effort同名映射、文本system角色映射和已声明beta不转发均需来源允许参数调整并写入响应/请求记录；thinking、interleaved thinking、缓存和实验功能在生成配置中关闭。未知beta、签名/缓存历史、工具增删等仍在上游派发前拒绝。实际测试后原配置恢复、临时Key撤销及日常来源保留均通过。
+
+新增Gemini CLI0.62.0版本卡及settings.json模型/认证字段自动预览、应用和三方恢复；保留后改字段和Google OAuth文件。实际CLI读取生成配置并请求Cove，Codex转换因不支持topK/thinkingConfig返回422且零上游派发，不能标为真实推理成功。其原生Gemini验收需该提供方凭据。Continue 1.3.40补充所选用户YAML的模型字段配置、官方扩展版本检测、三方恢复与Cove Key secret引用；不修改.env、仅选择chat角色，格式或用户修改不能安全恢复时保留原文件。官方解析器和实际文件证据见`continue-config.json`，官方解析器属于当时的文件验收；后续真实宿主两轮对话和 Cline CLI 验收见本页顶部，Continue 工具模式及其余 IDE 自动配置仍留在 D03/E07。
+
+OpenAI现已公开本地开源应用的Sign in with ChatGPT合同。新来源使用Cove名称、稳定host ID和动态入口注册，保存签发client ID，校验OIDC签名/aud/sub及计划scope；公开models/responses端点与旧私有Codex凭据隔离。刷新携带签发ID/resource，退出尝试可信同origin撤销并如实报告未确认。本人已批准并完成Cove自有注册真实授权；公开目录返回5个可列模型，native Responses两轮add返回12，Codex0.160.0真实printf与用量对账通过。隔离实例仅复制该新账号/来源/模型，以故意到期的本地元数据触发真实刷新，access/refresh轮换、身份/注册及计划scope保留，推理200；退出撤销收到200并清理凭据，随后使用原注册重新登录。自然过期与真实失败恢复未宣称通过。实际结果单独记录，合成回归不替代用户授权。原日常来源保持原端点、凭据和参数调整设置，仅本机OAuth回调host从localhost改为官方要求的127.0.0.1。
+
+新增Continue前的完整race共337项顶层、含子项697项通过、零失败、零跳过。收尾源码的完整race、静态/类型/前端行为检查、构建哈希、本机PID、真实复测和桌面开发包结果以 `test-results/completion-20261005-closeout/execution.json` 为准；较早真实报告各自保留其BuildID。Apple 冻结包公证完成，结果见本页顶部；Windows主机本轮无法连接，供应商与额外客户端未闭合项仍见唯一[实施台账](implementation-readiness.tsv)。
+
 # Cove v1.2 实施与验收记录
+
+## 2026-10-05 本人订阅真实验收与公证准备
+
+本人已完成指定 ChatGPT 账号授权。本轮先在 `ac307c3f1e147…` 构建完成原生 Responses SSE、Chat/Messages JSON 的真实两轮函数工具调用、最终结果 12、网页创建 Key 的一次性明文保护、Codex 0.160.0 实际 `printf` 执行及 8 条用量对账，见 [修复前真实报告](../test-results/completion-20261005/live-before-verification-fix.json)。测试使用可清理临时来源共享本人账号，日常来源的参数调整选择保留；这些证据不关闭 Cove 独立 OAuth 注册或其他提供方合同。
+
+继续验收发现原生订阅 Responses 的显式 JSON 文本验证实际派发 SSE 并误记 JSON 通过，[修复前回归](../test-results/completion-20261005/verification-format-before.log)已复现。现原生 JSON 验证返回 422 且不调用上游，默认和网页按钮选择受支持 SSE；Chat/Messages 按所选 JSON 或 SSE 真正调用并解析对应输出。[定向 race](../test-results/completion-20261005/verification-format-after.log)通过。此前“六项全部通过”不证明原生 JSON 能力，受支持格式共五项；最终构建的 [文本报告](../test-results/completion-20261005/text.json)、[工具与 CLI 报告](../test-results/completion-20261005/live.json)以及 [执行汇总](../test-results/completion-20261005/execution.json)需读取实际 `passed`、BuildID 和哈希，未产生或失败不计完成。
+
+真实额度取得提供方报告的 percent 单位与周窗口观测，尚不证明实际重置和失败恢复。Ma JiaYu（C5UWZ934C2）Developer ID 身份已核验；`cove-183` 公证 profile 在准备检查时缺失，随后复用既有 App Store Connect API 密钥配置并完成冻结包公证，正式结果见本页顶部。凭据不进入源码和报告。本轮 Windows 原验收主机 `Administrator@100.81.107.120` 连接超时；starlight 不是 Windows 验收证据。D01–D03、未覆盖外部实验和桌面验收继续保留在唯一台账中。
+
 
 这是当前源码的实施快照，基线为[完整 Spec v1.2](spec/01-COVE-COMPLETE-SPEC.md)。[104 项实施台账](implementation-readiness.tsv)是唯一逐项记录：设计状态取自设计合同，实现状态按当前代码和已完成检查重新核对，没有沿用规范中的旧 `current_status`。当前是本地开发预览，不能标记“104 项全部完成”。
 
@@ -16,7 +80,7 @@
 
 浏览器新增账号 GUI 创建/改名409重提/凭据保存清空/删除、各集合失败/空库/重试、动态字段错误与焦点、多文件配置真实写入后注入失败响应并恢复，以及十模块完整正反键盘遍历。扩展变更历史的长文件路径在管理窗口内允许折行，避免窄屏横向溢出。键盘检查在集合加载后展开全部表单，并考虑原生日期时间输入内部的多个 Tab 停靠点。原生 Tab 可将焦点移到浏览器界面，document.activeElement 为 BODY；验收要求全部当前可见控件可到达且不落到模态窗口后面的应用控件。具体完成结果、源 BuildID、CI 与包核验以 `test-results/completion-20261004/finish.json` 为准，未运行或未完成的检查不计通过。
 
-新增 macOS 签名公证候选包工具，复用原生开发包核验并验证签名、公证 Accepted、票据和 Gatekeeper 后才产生 DMG。工具参数与语法已核对；用户已选定签名身份；Apple 公证 profile 尚待在本机配置，实际签名公证尚未执行。D01–D03 的供应商独立授权/完整模型额度资源合同及额外闭源客户端自动入口、真实 E01–E10、正式签名和其余桌面故障验收仍保持未完成。
+新增 macOS 签名公证候选包工具，复用原生开发包核验并验证签名、公证 Accepted、票据和 Gatekeeper 后才产生 DMG。工具准备阶段已核对参数、语法和用户选定的签名身份；随后完成的 macOS 冻结包签名公证见本页顶部。D01–D03 的供应商独立授权/完整模型额度资源合同及额外闭源客户端自动入口、真实 E01–E10 和其余桌面故障验收仍保持未完成。
 
 ## 2026-10-04 管理审计与编辑保护补齐
 
@@ -177,7 +241,7 @@ node scripts/verify-live.mjs /absolute/isolated/config.json test-results/review-
 
 E01–E10 是账号授权、三协议工具、计数与限制、真实额度、故障切换、预算并发、配置恢复、干净安装、高级协议及更多提供方的运行实验。合成 E05/E06 场景已有局部证据，不能推导整组实验完成。真实授权和 provider wire、Codex 长会话、媒体/资源/后台、各客户端实际加载与直连恢复、各平台安装和服务生命周期仍待执行。WS原生取消修复的早期冻结版本通过19项真实TCP定向race（6.712秒），[证据转录](../test-results/v12-websocket-baseline.json)注明当时工具stdout与源码hash；之后新增显式Key owner的最终TCP复验受限。后台资格验证已接入真实现有Key、共享准入/预算/记录和只读终态观察，7组新测试及最终主目录定向race通过；未知状态、无可核验文本或失败不发布资格。后半程沙箱变更禁止新建本机监听套接字，最终完整网络测试、SDK、浏览器与真实子进程复验受环境限制；此限制与D/E外部合同缺口分别记录。
 
-通知使用完整 Spec §33.2 的默认剩余额度 <=10%；适配附件已统一，没有增加阈值配置。R099 团队充值和远程多租户明确范围外，不计为已实现。用户已选择 MIT，LICENSE 已纳入交付。正式签名尚未提供，当前包仍是本平台开发产物：[macOS arm64开发包](../bin/cove-development-darwin-arm64.tar.gz)、[SHA-256](../bin/cove-development-darwin-arm64.tar.gz.sha256)。最终源码、checks与产物状态见 [final-checks.json](../test-results/v12-final-checks.json)。
+通知使用完整 Spec §33.2 的默认剩余额度 <=10%；适配附件已统一，没有增加阈值配置。R099 在该历史基线中范围外；2026-10-05用户已选择单服务器企业扩展，当前实现与验收见本文新增章节及独立企业规格。用户已选择 MIT，LICENSE 已纳入交付。正式签名尚未提供，当前包仍是本平台开发产物：[macOS arm64开发包](../bin/cove-development-darwin-arm64.tar.gz)、[SHA-256](../bin/cove-development-darwin-arm64.tar.gz.sha256)。最终源码、checks与产物状态见 [final-checks.json](../test-results/v12-final-checks.json)。
 
 台账的 `implemented_local*` 表示已有代码和相应本地检查，剩余栏仍限制结论；`supported_subset*`、`*_external_pending` 表示支持子集或合同未闭合；`integration_pending` 是本地接入/回归未完；`performance_pending`、`*_ui_partial` 和 `ui_acceptance_pending` 不算相应验收通过。每行 code/test 是当前实际文件与符号锚点，evidence 指向已记录的执行范围；整包 race 日志只证明该次基线，不保证其后新增测试已在同一产物运行。
 

@@ -5,17 +5,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"gatt/internal/app"
 	"gatt/web"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -63,8 +66,8 @@ func run() error {
 	if command == "open" {
 		return openManagement(c)
 	}
-	if command != "serve" && command != "recover-admin" {
-		return fmt.Errorf("支持的命令：serve、open、recover-admin")
+	if command != "serve" && command != "recover-admin" && command != "enterprise-init" {
+		return fmt.Errorf("支持的命令：serve、open、recover-admin、enterprise-init <用户名>")
 	}
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {
@@ -90,6 +93,27 @@ func run() error {
 			_ = store.DB.Close()
 		}
 	}()
+	if command == "enterprise-init" {
+		if c.Enterprise == nil || len(platformArgs) != 1 {
+			return errors.New("使用独立企业配置：gatt -config <配置文件> enterprise-init <用户名>")
+		}
+		var password []byte
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprint(os.Stderr, "企业管理员密码（至少12字节，不显示）：")
+			password, err = term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+		} else {
+			password, err = io.ReadAll(io.LimitReader(os.Stdin, 1025))
+		}
+		if err != nil {
+			return errors.New("密码读取失败")
+		}
+		if err = app.InitializeEnterprise(store, platformArgs[0], strings.TrimRight(string(password), "\r\n")); err != nil {
+			return err
+		}
+		fmt.Println("企业管理员已初始化。启动 serve 后通过企业公开地址登录。")
+		return nil
+	}
 	if command == "recover-admin" {
 		if err := app.RecoverAdmin(store, vault); err != nil {
 			return fmt.Errorf("本机管理凭据恢复失败，请检查本地存储后重新运行 recover-admin: %w", err)
@@ -110,17 +134,37 @@ func run() error {
 	storageDrained = false
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var enterprise *app.Enterprise
+	if c.Enterprise != nil {
+		enterprise, err = app.NewEnterprise(gateway, assets, ctx)
+		if err != nil {
+			gateway.CloseAdmission()
+			gateway.CancelAll()
+			return err
+		}
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if closeErr := enterprise.Close(closeCtx); closeErr != nil {
+				fmt.Fprintln(os.Stderr, "企业租户关停未完成：", closeErr)
+			}
+		}()
+	}
 	runtimeRecord, e := publishRuntime(*config, c, *background)
 	if e != nil {
 		return e
 	}
 	defer os.Remove(filepath.Join(c.DataDir, "runtime.json"))
-	server.Handler = platformRestoreControlledHandler(gateway, runtimeRecord, platformRestoreControls{Stop: stop, Drain: gateway.DrainForSwitch, SetStaged: gateway.SetStagedAdmission, IsStaged: gateway.StagedAdmission, Ready: gateway.ReadyForSwitch})
+	if enterprise != nil {
+		server.Handler = enterprise
+	} else {
+		server.Handler = platformRestoreControlledHandler(gateway, runtimeRecord, platformRestoreControls{Stop: stop, Drain: gateway.DrainForSwitch, SetStaged: gateway.SetStagedAdmission, IsStaged: gateway.StagedAdmission, Ready: gateway.ReadyForSwitch})
+	}
 	gateway.StartMaintenance(ctx)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	fmt.Printf("Cove %s · build %s · http://%s\n", app.Version, app.BuildID, c.Listen)
-	if !*background {
+	if !*background && enterprise == nil {
 		if e := openManagement(c); e != nil {
 			fmt.Fprintln(os.Stderr, "管理界面未自动打开；可运行 gatt -config <配置文件> open 重试")
 		}
@@ -148,6 +192,9 @@ func run() error {
 	}
 	storageDrained = true
 	gateway.CloseNetwork()
+	if enterprise != nil {
+		err = errors.Join(err, enterprise.Close(drain))
+	}
 	return err
 }
 

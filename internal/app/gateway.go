@@ -339,10 +339,14 @@ func prepareUpstream(ctx context.Context, src Source, body map[string]json.RawMe
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	if src.Kind == "codex_subscription" {
-		req.Header.Set("Chatgpt-Account-Id", account)
-		req.Header.Set("originator", "codex_cli_rs")
-		req.Header.Set("Version", c.ClientVersion)
-		req.Header.Set("User-Agent", "gatt/"+Version+" codex_cli_rs/"+c.ClientVersion)
+		if chatGPTDirectSource(src) {
+			req.Header.Set("User-Agent", "Cove/"+Version)
+		} else {
+			req.Header.Set("Chatgpt-Account-Id", account)
+			req.Header.Set("originator", "codex_cli_rs")
+			req.Header.Set("Version", c.ClientVersion)
+			req.Header.Set("User-Agent", "gatt/"+Version+" codex_cli_rs/"+c.ClientVersion)
+		}
 	}
 	return req, nil
 }
@@ -782,7 +786,7 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 	}
 	src = selectedCandidate.Source
 	if protocol == "messages" {
-		if betaErr := validateMessagesBeta(r.Header.Get("Anthropic-Beta"), nativeDirect, selectedCandidate.Model); betaErr != nil {
+		if betaErr := validateMessagesBeta(r.Header.Get("Anthropic-Beta"), nativeDirect, selectedCandidate.Model, src, adapter); betaErr != nil {
 			reject(422, betaErr.Error(), "anthropic-beta")
 			return
 		}
@@ -1227,7 +1231,7 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 			break
 		}
 		if protocol == "messages" {
-			if betaErr := validateMessagesBeta(r.Header.Get("Anthropic-Beta"), nextNative, nextCandidate.Model); betaErr != nil {
+			if betaErr := validateMessagesBeta(r.Header.Get("Anthropic-Beta"), nextNative, nextCandidate.Model, candidate, nextAdapter); betaErr != nil {
 				a.mu.Unlock()
 				err = &accountingError{422, "anthropic-beta", betaErr.Error()}
 				break
@@ -1274,6 +1278,10 @@ func (a *App) forward(w http.ResponseWriter, r *http.Request, adminSource string
 		next.Cost = nil
 		next.DurationMS = 0
 		next.Price = candidate.Price
+		next.Adjustments = nil
+		if nextAdapter != nil {
+			next.Adjustments = nextAdapter.adjustments
+		}
 		next.Accounting, prepareErr = a.prepareAccounting(key, candidate, nextBody)
 		if prepareErr != nil {
 			a.policyState.ReleaseProbe(nextCandidate)
