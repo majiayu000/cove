@@ -4,7 +4,9 @@
 
 本机与大阪运行冻结构建 `343e720e5e66…`。该 macOS arm64 DMG 已获 Apple Accepted（`2b6d95fb-fe4a-47e7-a6b4-1d7665a4f808`），票据、严格签名、Gatekeeper、30 个包内文件和隔离原生启动通过；第二台物理 Mac 安装/锁/权限/重启 25 项及 launchd/受控 SIGKILL 后手动启动恢复 20 项通过。合成性能保留原 `6047476412ae…` 构建：8 路流、1800 秒、百万记录的 7 项门槛通过，附加 TTFT P95 4.385ms、请求第一页 P95 1.236ms、取消释放 0.061s；不冒称大阪压力测试或最终构建的 30 分钟压力结果。
 
-在已批准的 New API `gpt-5.6-sol` 来源上，Continue 官方 VS Code 宿主、OpenCode 1.18.27 CLI、Cline 3.0.68 CLI 均完成真实 MCP 工具及结果回传。OpenCode/Cline 由模型实际加载隔离 Skill；Continue 的 Skill 由受控测试驱动加载执行。Cline 验收脚本使用 `+00:00` 时间戳时被官方解析器拒绝并重置来源，修正为 `Z` 后通过；Cove 生产配置原已使用 `Z`，没有相应生产修复。包含失败尝试在内，本轮共 27 次 Cove 生成请求，均限于批准来源和模型，所有临时 Key 在两小时内到期且已撤销，撤销后 401、私有配置和测试进程清理通过。实际请求数和每个构建范围见 `test-results/all-completion-20261006/execution.json`。
+在已批准的 New API `gpt-5.6-sol` 来源上，Continue 官方 VS Code 宿主、OpenCode 1.18.27 CLI、Cline 3.0.68 CLI 均完成真实 MCP 工具及结果回传。OpenCode/Cline 由模型实际加载隔离 Skill；Continue 的 Skill 由受控测试驱动加载执行。Cline 验收脚本使用 `+00:00` 时间戳时被官方解析器拒绝并重置来源，修正为 `Z` 后通过；Cove 生产配置原已使用 `Z`，没有相应生产修复。包含早期失败尝试在内，上述批次共 27 次 Cove 生成请求，均限于批准来源和模型，所有临时 Key 在两小时内到期且已撤销，撤销后 401、私有配置和测试进程清理通过。实际请求数和每个构建范围见 `test-results/all-completion-20261006/execution.json`。
+
+新增 [Roo 原生 VSIX](../scripts/roo-vscode/README.md)：固定 Roo 3.53.0 官方 profile API 创建、选择和删除独立 Cove profile，保留原项和用户后来选择；已存在/重建同名项、原项删除、取消和失败重试均有保护。9 项回归、6 项原生 profile 预检通过；正式官方扩展经大阪 New API 由模型加载 Skill、调用 stdio MCP 并准确回传，3 次成功请求均有完整用量，累计 30 次生成。临时 Key 撤销后 401、profile 删除及进程清理通过。宿主工具验收关闭自动目录扫描（`maxWorkspaceFiles=0`），GUI 输入/编辑、默认目录上下文、最后反馈按钮和删除确认按钮仍未验；删除使用同一生产恢复函数与已批准 fixture。该独立 VSIX 不改变网页文件 autoapply 的 422 边界或运行中的 `343e720e5e66…` 网关。报告见 `test-results/followup-20261006/roo-tools.json`。上一文档提交的 [三平台 CI](https://github.com/majiayu000/cove/actions/runs/37373872323) 也已全部成功，最初 Linux 没有取得托管 runner 的取消记录保留。
 
 [审阅 PR #3](https://github.com/majiayu000/cove/pull/3) 保持 draft，没有合并或发布正式版本。Windows 实机 `100.81.107.120` 最新 SSH 仍不可达；供应商注册/授权、完整资源与计费合同、正式账单、额外 IDE 自动配置和未覆盖的高级操作/物理实验仍以 [104 项实施台账](implementation-readiness.tsv) 的剩余栏为准。整个库仍未全部完成。
 

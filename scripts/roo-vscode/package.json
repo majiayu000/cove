@@ -1,0 +1,19 @@
+{
+  "name": "cove-roo",
+  "displayName": "Cove for Roo Code",
+  "description": "Connect Roo Code to Cove using Roo's native profile API and restore the previous selection.",
+  "version": "0.1.0",
+  "publisher": "majiayu000",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/majiayu000/cove.git", "directory": "scripts/roo-vscode" },
+  "engines": { "vscode": "^1.100.0" },
+  "main": "./extension.cjs",
+  "extensionDependencies": ["RooVeterinaryInc.roo-cline"],
+  "contributes": {
+    "commands": [
+      { "command": "cove.roo.connect", "title": "Cove: Connect Roo Code" },
+      { "command": "cove.roo.restore", "title": "Cove: Restore Roo Code Profile" }
+    ]
+  },
+  "scripts": { "test": "node --test extension.test.cjs" }
+}
