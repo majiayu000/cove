@@ -1,5 +1,12 @@
 /* Operational forms use the same tokens and surface treatment as the supplied v13. */
 :root { font-synthesis:none; }
+.enterprise-shell {max-width:1000px;margin:24px auto;padding:24px;display:grid;gap:20px;background:var(--panel);border:1px solid var(--line);border-radius:14px;}
+.enterprise-shell form {display:grid;gap:12px;max-width:480px;}
+.enterprise-shell ul {padding-left:20px;display:grid;gap:10px;}
+.enterprise-shell li {overflow-wrap:anywhere;}
+.enterprise-shell li button {margin-left:12px;}
+.enterprise-shell a {color:var(--accent);}
+.enterprise-shell table {width:100%;text-align:left;}
 button,input,select,textarea { font:inherit; }
 button { border:1px solid var(--line);background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--accentInk);border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:500;white-space:nowrap; }
 button:disabled { opacity:.45;cursor:not-allowed; }

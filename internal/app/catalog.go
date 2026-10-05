@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -48,6 +49,7 @@ type SourceModel struct {
 	Discovery           string                    `json:"discovery"`
 	Verification        string                    `json:"verification"`
 	DiscoveredAt        *time.Time                `json:"discovered_at"`
+	CatalogOrder        *int                      `json:"catalog_order,omitempty"`
 	ContextLimit        *int64                    `json:"context_limit"`
 	MaxOutput           *int64                    `json:"max_output"`
 	Price               *Price                    `json:"price"`
@@ -109,6 +111,18 @@ func (s *Store) models(source string) ([]SourceModel, error) {
 	for i := range out {
 		s.effectiveModelVerification(&out[i])
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SourceID != out[j].SourceID {
+			return out[i].SourceID < out[j].SourceID
+		}
+		if out[i].CatalogOrder == nil {
+			return false
+		}
+		if out[j].CatalogOrder == nil {
+			return true
+		}
+		return *out[i].CatalogOrder < *out[j].CatalogOrder
+	})
 	return out, nil
 }
 func (s *Store) account(aid string) (Account, string, error) {

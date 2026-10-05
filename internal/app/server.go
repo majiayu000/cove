@@ -352,9 +352,16 @@ func (a *App) adminDispatch(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{"version": Version, "build_id": BuildID, "listen": a.Config.Listen, "data_dir": a.Config.DataDir, "storage_healthy": !a.storageFailed.Load(), "maintenance_error": a.maintenanceError, "active_requests": len(a.running), "queued_requests": len(a.queued), "queue": a.queueView(), "account_active": maps.Clone(a.accountActive), "route_active": maps.Clone(a.routeActive), "secrets_healthy": secretsHealthy, "accepting_requests": !a.stopping && !a.stagedAdmission && !a.backupQuiescing && !a.storageFailed.Load() && secretsHealthy, "subscription_status": "experimental_unverified", "codex_client_version": a.Config.Codex.ClientVersion}
 		a.mu.Unlock()
 		for k, v := range a.operationsStatus() {
+			if a.Config.PublicAPIBase != "" && (k == "data_dir" || k == "config_path" || k == "runtime" || k == "platform") {
+				continue
+			}
 			if _, exists := out[k]; !exists {
 				out[k] = v
 			}
+		}
+		if a.Config.PublicAPIBase != "" {
+			out["api_base_url"] = a.Config.PublicAPIBase
+			delete(out, "data_dir")
 		}
 		writeJSON(w, 200, out)
 		return

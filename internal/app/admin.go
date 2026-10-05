@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -61,6 +62,9 @@ func (a *App) sourcesAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		src := Source{ID: id("src"), Kind: in.Kind, Enabled: true, Version: 1, Generation: 1, Models: []string{}, AuthStatus: "not_configured", Verification: Verification{Status: "untested", Capabilities: []string{}}, Quota: map[string]any{"status": "unknown", "observed_at": nil}}
+		if in.Enabled != nil {
+			src.Enabled = *in.Enabled
+		}
 		src.AccountID = in.AccountID
 		src.Provider = in.Provider
 		src.CloudProviderConfig = in.CloudProviderConfig
@@ -144,6 +148,9 @@ func (a *App) sourcesAPI(w http.ResponseWriter, r *http.Request) {
 			src.Provider = "codex"
 			src.NativeProtocol = "responses"
 			src.BaseURL = a.Config.Codex.BaseURL
+			if in.BaseURL != nil && strings.TrimRight(*in.BaseURL, "/") == chatGPTResource {
+				src.BaseURL = chatGPTResource
+			}
 			if in.AccountID == "" {
 				src.AuthStatus = "logged_out"
 			}
@@ -246,11 +253,16 @@ func (a *App) sourcesAPI(w http.ResponseWriter, r *http.Request) {
 				fail(w, 503, storageError().Error(), "")
 				return
 			}
+			revocation := a.revokeChatGPTSessionLocked(r.Context(), src, old)
 			cleanup := "completed"
 			if a.cleanupSecret(old) != nil {
 				cleanup = "failed"
 			}
-			writeJSON(w, 200, map[string]any{"source": src, "local_logout": "completed", "secret_cleanup": cleanup, "upstream_revocation": "unknown", "message": "本地授权已退出；不保证上游会话撤销", "cleanup_warning": a.maintenanceError})
+			message := "本地授权已退出；上游会话撤销未确认，可到 ChatGPT 设置断开 Cove"
+			if revocation == "confirmed" {
+				message = "本地授权已退出，上游可刷新会话已撤销"
+			}
+			writeJSON(w, 200, map[string]any{"source": src, "local_logout": "completed", "secret_cleanup": cleanup, "upstream_revocation": revocation, "message": message, "cleanup_warning": a.maintenanceError})
 			return
 		case "quota-refresh":
 			a.codexQuotaRefreshAPI(w, r, src, &a.quotaObserver)
@@ -518,6 +530,9 @@ func (a *App) replaceCredential(src *Source, material string, subscription bool)
 		var c Credential
 		if json.Unmarshal([]byte(material), &c) == nil && c.Subject != "" && c.Account != "" {
 			src.VerifiedIdentity = map[string]any{"verified": true, "subject_hash": digest(c.Subject + "\x00" + c.Account), "display_name": identityLabel(c)}
+			if c.ClientID != "" {
+				src.VerifiedIdentity["plan_usage_enabled"] = slices.Contains(c.Scopes, chatGPTDirectScope)
+			}
 		}
 	}
 	if subscription {

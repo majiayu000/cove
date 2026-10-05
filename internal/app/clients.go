@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -46,6 +47,9 @@ func clientCards() []clientCard {
 		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0 production-generated config and isolated two-round tool loop verified"},
 		{Kind: "claude", Name: "Claude Code", ContractVersion: "2.1.281", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".claude", "settings.json")}, "project": {"<项目>/.claude/settings.local.json"}}, Evidence: "Cove v1.2 external contracts 5.2; code.claude.com/docs/en/settings and llm-gateway"},
 		{Kind: "opencode", Name: "OpenCode", ContractVersion: "1.18.33", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".config", "opencode", "opencode.json")}, "project": {"<项目>/opencode.json", "<项目>/opencode.jsonc"}}, Evidence: "Cove v1.2; sst/opencode 7945de208964a49300d7f770d1a71d078db9a4c4; 1.18.27 isolated debug config --pure parser accepted"},
+		{Kind: "gemini", Name: "Gemini CLI", ContractVersion: "0.62.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".gemini", "settings.json")}, "project": {"<项目>/.gemini/settings.json"}}, Evidence: "Gemini CLI 0.62.0; geminicli.com/docs/reference/configuration; gemini-api-key auth and GOOGLE_GEMINI_BASE_URL loopback override"},
+		{Kind: "continue", Name: "Continue (VS Code)", ContractVersion: "1.3.40", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".continue", "config.yaml")}}, Evidence: "Continue 1.3.40; docs.continue.dev/reference and local secrets contract; selected config.yaml only, IDE activation requires separate acceptance"},
+		{Kind: "cline", Name: "Cline CLI", ContractVersion: "3.0.68", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CLINE_DATA_DIR>/settings/providers.json"}}, Evidence: "Official cline 3.0.68 and @cline/core 0.0.90; ProviderSettingsManager schema and actual CLI OPENAI_API_KEY/Chat boundary verified; VS Code extension is a separate client"},
 	}
 }
 
@@ -54,23 +58,48 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 	if name == "claude" {
 		name = "claude"
 	}
+	if name == "continue" {
+		name = "code"
+	}
 	binary, err := exec.LookPath(name)
 	if err != nil {
 		card.Status = "not_installed"
 		return card
 	}
 	card.Binary = binary
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	timeout := 3 * time.Second
+	if card.Kind == "cline" {
+		timeout = 8 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "--version")
+	args := []string{"--version"}
+	if card.Kind == "continue" {
+		args = []string{"--list-extensions", "--show-versions"}
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.WaitDelay = time.Second // Descendants must not keep the version pipe open indefinitely.
 	var out bytes.Buffer
-	cmd.Stdout = &clientBoundedWriter{writer: &out, left: 2048}
+	cmd.Stdout = &clientBoundedWriter{writer: &out, left: 65536}
 	cmd.Stderr = io.Discard
 	if err = cmd.Run(); err != nil {
 		card.Status = "detection_failed"
 		return card
 	}
 	card.Version = strings.TrimSpace(out.String())
+	if card.Kind == "continue" {
+		card.Version = ""
+		for _, line := range strings.Split(out.String(), "\n") {
+			if publisher, version, ok := strings.Cut(strings.TrimSpace(line), "@"); ok && strings.EqualFold(publisher, "Continue.continue") {
+				card.Version = version
+				break
+			}
+		}
+		if card.Version == "" {
+			card.Status = "not_installed"
+			return card
+		}
+	}
 	version := strings.TrimPrefix(card.Version, "codex-cli ")
 	version = strings.TrimSuffix(version, " (Claude Code)")
 	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0") || card.Kind == "opencode" && version == "1.18.27"
@@ -117,18 +146,19 @@ type clientField struct {
 	Ours          string   `json:"ours_value,omitempty"`
 }
 type clientPrivateChange struct {
-	Kind           string            `json:"kind"`
-	Model          string            `json:"model"`
-	Scope          string            `json:"scope"`
-	Root           string            `json:"authorized_root"`
-	Path           string            `json:"path"`
-	Version        string            `json:"client_version"`
-	BeforeHash     string            `json:"before_hash"`
-	AfterHash      string            `json:"after_hash"`
-	Existed        bool              `json:"existed"`
-	Fields         []clientField     `json:"fields"`
-	CreatedParents [][]string        `json:"created_parents"`
-	OverrideHashes map[string]string `json:"override_hashes,omitempty"`
+	Kind                      string            `json:"kind"`
+	Model                     string            `json:"model"`
+	Scope                     string            `json:"scope"`
+	Root                      string            `json:"authorized_root"`
+	Path                      string            `json:"path"`
+	Version                   string            `json:"client_version"`
+	BeforeHash                string            `json:"before_hash"`
+	AfterHash                 string            `json:"after_hash"`
+	Existed                   bool              `json:"existed"`
+	Fields                    []clientField     `json:"fields"`
+	CreatedParents            [][]string        `json:"created_parents"`
+	OverrideHashes            map[string]string `json:"override_hashes,omitempty"`
+	SubscriptionCompatibility bool              `json:"subscription_compatibility,omitempty"`
 }
 type clientDiff struct {
 	Field         string `json:"field"`
@@ -236,7 +266,7 @@ func (a *App) clientConfiguration(kind, origin string) (clientConfiguration, err
 		out.Reason = "所选配置格式已改变，未读取其他文件"
 		return out, nil
 	}
-	for _, field := range clientDesiredFields(private.Kind, private.Model, origin) {
+	for _, field := range clientDesiredFields(private.Kind, private.Model, origin, private.SubscriptionCompatibility) {
 		current, present, err := doc.field(field.Path)
 		if err != nil || !present || current != field.Ours {
 			out.State = "modified"
@@ -257,9 +287,15 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cards := clientCards()
+		var detected sync.WaitGroup
 		for i := range cards {
-			cards[i] = detectClient(r.Context(), cards[i])
+			detected.Add(1)
+			go func() {
+				defer detected.Done()
+				cards[i] = detectClient(r.Context(), cards[i])
+			}()
 		}
+		detected.Wait()
 		a.mu.Lock()
 		origin := "http://" + a.Config.Listen
 		a.mu.Unlock()
@@ -320,6 +356,7 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, storageError().Error(), "")
 		return
 	}
+	subscriptionCompatibility := false
 	if in.KeyID != "" {
 		var key ClientKey
 		var keyData string
@@ -331,6 +368,14 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		if err != nil || json.Unmarshal([]byte(keyData), &key) != nil || key.Revoked {
 			fail(w, 409, "所选客户端 Key 不存在或已撤销", "key_id")
 			return
+		}
+		if (card.Kind == "claude" || card.Kind == "continue") && key.SourceID != "" {
+			source, err := a.Store.source(key.SourceID)
+			if err != nil {
+				fail(w, 503, "客户端 Key 的来源不可读", "key_id")
+				return
+			}
+			subscriptionCompatibility = source.Kind == "codex_subscription"
 		}
 	}
 	target, err := openClientTarget(card.Kind, in.Scope, in.Root, in.Path, false)
@@ -344,12 +389,27 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "无法安全读取选定配置文件；请检查权限和文件类型", "explicit_path")
 		return
 	}
-	fields := clientDesiredFields(card.Kind, in.Model, "http://"+a.Config.Listen)
+	fields := clientDesiredFields(card.Kind, in.Model, "http://"+a.Config.Listen, subscriptionCompatibility)
 	private := clientPrivateChange{Kind: card.Kind, Model: in.Model, Scope: in.Scope, Root: in.Root, Path: in.Path, Version: card.Version, BeforeHash: clientHash(before, existed), Existed: existed}
+	private.SubscriptionCompatibility = subscriptionCompatibility
 	doc, err := parseClientDocument(card.Kind, in.Path, before, existed)
 	if err != nil {
 		fail(w, 422, "unsupported_format：配置格式不能无损编辑，原文件保留", "explicit_path")
 		return
+	}
+	if card.Kind == "cline" {
+		if _, present, e := doc.field([]string{"providers", "openai-compatible", "updatedAt"}); e != nil {
+			fail(w, 422, "unsupported_format：Cline provider 时间字段不是字符串，原文件保留", "explicit_path")
+			return
+		} else if !present {
+			fields = append(fields, clientField{Path: []string{"providers", "openai-compatible", "updatedAt"}, OursPresent: true, Ours: time.Now().UTC().Format(time.RFC3339Nano)})
+		}
+		if _, present, e := doc.field([]string{"providers", "openai-compatible", "tokenSource"}); e != nil {
+			fail(w, 422, "unsupported_format：Cline tokenSource 不是字符串，原文件保留", "explicit_path")
+			return
+		} else if !present {
+			fields = append(fields, clientField{Path: []string{"providers", "openai-compatible", "tokenSource"}, OursPresent: true, Ours: "manual"})
+		}
 	}
 	private.CreatedParents = doc.missingParents(fields)
 	for _, field := range fields {
@@ -373,6 +433,24 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 	private.AfterHash = clientHash(after, true)
 	now := time.Now().UTC()
 	preview := clientPreview{ID: id("cprev"), ExpiresAt: now.Add(10 * time.Minute), Kind: card.Kind, Scope: in.Scope, Version: card.Version, Status: "ready", Blockers: []string{}, Warnings: []string{"文件解析通过只证明配置格式；连接、文本和工具均未测试。", "未选择的管理配置、客户端 CLI 参数和其他进程环境未检查；启动客户端时确认这些来源未覆盖所选配置。"}, Validation: map[string]any{"format": "passed", "runtime": "untested", "adapter_contract": "cove-v1.2", "effective_config": "unverified"}, Files: []clientFilePreview{{Path: in.Path, Exists: existed, BaseHash: private.BeforeHash, Diff: redactedClientDiff(private.Fields)}}, RequiredSecret: clientSecretDelivery(card.Kind, in.Root)}
+	if subscriptionCompatibility && card.Kind == "claude" {
+		preview.Warnings = append(preview.Warnings, "订阅转换会关闭 Anthropic 缓存、thinking、interleaved thinking 和实验功能。来源须允许参数调整：max_tokens 不作硬上限，metadata.user_id 和已声明的 Claude Code/effort/system beta 头不转发；effort 映射到同名 reasoning.effort，文本 system 消息映射到上游指令角色，不保证相同思考量和指令优先级。每次调整在响应头和请求记录中公开。")
+	}
+	if card.Kind == "gemini" {
+		preview.RequiredSecret["instruction"] = "仅向 Gemini 进程传入新建 Cove Key 的 GEMINI_API_KEY、GOOGLE_GEMINI_BASE_URL=http://" + a.Config.Listen + " 和 GOOGLE_GENAI_API_VERSION=v1beta；不修改全局 shell、.env 或 Google 登录文件。"
+	}
+	if card.Kind == "continue" {
+		preview.Warnings = append(preview.Warnings, "仅配置 chat 角色；没有启用 autocomplete、embedding、rerank 或声明工具能力。Continue 的本地 secret 必须通过其官方流程单独提供；Cove 不读取或写入 .env。当前所选配置的扩展加载、连接和工具需单独验收。")
+		if in.KeyID == "" {
+			preview.Warnings = append(preview.Warnings, "使用 ChatGPT 订阅时，请先选择对应的 Cove Key 再预览，以生成订阅兼容的请求选项；未选择 Key 时不猜测来源能力。")
+		}
+		if subscriptionCompatibility {
+			preview.Warnings = append(preview.Warnings, "所选 Key 使用订阅来源：Continue 将使用 Chat 转换，并在客户端请求中把 temperature、top_p、max_tokens 和 max_completion_tokens 设为 null，采用上游默认采样且不请求输出 token 硬上限；其他 requestOptions 保留。")
+		}
+	}
+	if card.Kind == "cline" {
+		preview.Warnings = append(preview.Warnings, "仅配置 Cline CLI 的独立数据目录；启动时使用 --data-dir 指向该目录，并仅向该进程提供 OPENAI_API_KEY。所选 openai-compatible 若已有持久凭据则阻止应用，其他 provider 凭据保留；此配置不代表 Cline VS Code 扩展已接入。")
+	}
 	if card.Status != "installed" {
 		preview.Blockers = append(preview.Blockers, card.Status+"：当前客户端版本没有已核验的配置卡")
 	}
@@ -439,7 +517,7 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, preview)
 }
 
-func clientDesiredFields(kind, model, origin string) []clientField {
+func clientDesiredFields(kind, model, origin string, subscriptionCompatibility ...bool) []clientField {
 	add := func(path []string, value string) clientField {
 		return clientField{Path: path, OursPresent: true, Ours: value}
 	}
@@ -447,7 +525,26 @@ func clientDesiredFields(kind, model, origin string) []clientField {
 	case "codex":
 		return []clientField{add([]string{"model_provider"}, "cove"), add([]string{"model"}, model), add([]string{"model_providers", "cove", "name"}, "Cove"), add([]string{"model_providers", "cove", "base_url"}, origin+"/v1"), add([]string{"model_providers", "cove", "wire_api"}, "responses"), add([]string{"model_providers", "cove", "env_key"}, "COVE_API_KEY")}
 	case "claude":
-		return []clientField{add([]string{"model"}, model), add([]string{"env", "ANTHROPIC_BASE_URL"}, origin)}
+		fields := []clientField{add([]string{"model"}, model), add([]string{"env", "ANTHROPIC_BASE_URL"}, origin)}
+		if len(subscriptionCompatibility) > 0 && subscriptionCompatibility[0] {
+			for _, name := range []string{"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "CLAUDE_CODE_DISABLE_THINKING", "DISABLE_INTERLEAVED_THINKING"} {
+				fields = append(fields, add([]string{"env", name}, "1"))
+			}
+		}
+		return fields
+	case "gemini":
+		return []clientField{add([]string{"model", "name"}, model), add([]string{"security", "auth", "selectedType"}, "gemini-api-key")}
+	case "continue":
+		fields := []clientField{add([]string{"models", "Cove", "name"}, "Cove"), add([]string{"models", "Cove", "provider"}, "openai"), add([]string{"models", "Cove", "model"}, model), add([]string{"models", "Cove", "apiBase"}, origin+"/v1"), add([]string{"models", "Cove", "apiKey"}, "${{ secrets.COVE_API_KEY }}"), add([]string{"models", "Cove", "roles"}, `["chat"]`)}
+		if len(subscriptionCompatibility) > 0 && subscriptionCompatibility[0] {
+			fields = append(fields, add([]string{"models", "Cove", "useResponsesApi"}, "false"))
+			for _, name := range []string{"temperature", "top_p", "max_tokens", "max_completion_tokens"} {
+				fields = append(fields, add([]string{"models", "Cove", "requestOptions", "extraBodyProperties", name}, "null"))
+			}
+		}
+		return fields
+	case "cline":
+		return []clientField{add([]string{"lastUsedProvider"}, "openai-compatible"), add([]string{"providers", "openai-compatible", "settings", "provider"}, "openai-compatible"), add([]string{"providers", "openai-compatible", "settings", "model"}, model), add([]string{"providers", "openai-compatible", "settings", "baseUrl"}, origin+"/v1")}
 	default:
 		return []clientField{add([]string{"model"}, "cove/"+model), add([]string{"provider", "cove", "npm"}, "@ai-sdk/openai-compatible"), add([]string{"provider", "cove", "name"}, "Cove"), add([]string{"provider", "cove", "options", "baseURL"}, origin+"/v1"), add([]string{"provider", "cove", "options", "apiKey"}, "{env:COVE_API_KEY}"), add([]string{"provider", "cove", "models", model, "name"}, model)}
 	}
@@ -457,9 +554,25 @@ func clientSecretDelivery(kind, root string) map[string]any {
 	if kind == "claude" {
 		name = "ANTHROPIC_AUTH_TOKEN"
 	}
+	if kind == "gemini" {
+		name = "GEMINI_API_KEY"
+	}
+	if kind == "cline" {
+		name = "OPENAI_API_KEY"
+	}
 	out := map[string]any{"mode": "env_reference", "env_name": name, "status": "needs_secret", "persisted": false, "instruction": "启动客户端时仅向该进程传入新建 Cove Key；不要修改全局 shell 或 .env。"}
 	if kind == "codex" {
 		out["codex_home"] = root
+	}
+	if kind == "gemini" {
+		out["instruction"] = "仅向启动的 Gemini 进程传入 GEMINI_API_KEY（新建 Cove Key）、GOOGLE_GEMINI_BASE_URL（Cove origin）和 GOOGLE_GENAI_API_VERSION=v1beta；不要修改全局 shell、.env 或 Google 登录文件。"
+	}
+	if kind == "continue" {
+		out["mode"] = "continue_secret"
+		out["instruction"] = "配置仅引用 Continue 的 secrets.COVE_API_KEY。请通过 Continue 官方本地 secret 流程单独提供新建 Cove Key；Cove 不读取或修改任何 .env，缺少 secret 时连接尚不可用。"
+	}
+	if kind == "cline" {
+		out["instruction"] = "仅向 Cline CLI 进程传入新建 Cove Key 的 OPENAI_API_KEY，并使用 --data-dir 指向所选独立数据目录；不要修改全局 shell、.env 或原有 provider 凭据。"
 	}
 	return out
 }
@@ -474,6 +587,10 @@ func clientEnvironmentBlockers(kind, root string) []string {
 		}
 	case "opencode":
 		names = []string{"OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR"}
+	case "gemini":
+		names = []string{"GEMINI_MODEL", "GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_VERSION"}
+	case "cline":
+		names = []string{"CLINE_PROVIDER_SETTINGS_PATH", "CLINE_DATA_DIR", "OPENAI_API_KEY"}
 	}
 	var blockers []string
 	for _, name := range names {
@@ -795,8 +912,8 @@ func (a *App) applyClientConfig(w http.ResponseWriter, r *http.Request) {
 		a.applyConfigExtension(w, r, preview, ref, in)
 		return
 	}
-	if in.SecretDelivery != "env_reference" {
-		fail(w, 422, "本客户端合同只支持进程环境交付 Key；不接收或持久化明文 Key", "secret_delivery")
+	if in.SecretDelivery != preview.RequiredSecret["mode"] {
+		fail(w, 422, "请选择预览指定的 Key 引用方式；不接收或持久化明文 Key", "secret_delivery")
 		return
 	}
 	var private clientPrivateChange
@@ -932,6 +1049,12 @@ func openClientTarget(kind, scope, root, path string, create bool) (*clientTarge
 		valid = scope == "user" && relative == filepath.Join(".claude", "settings.json") || scope == "project" && relative == filepath.Join(".claude", "settings.local.json")
 	case "opencode":
 		valid = scope == "user" && relative == filepath.Join(".config", "opencode", "opencode.json") || scope == "project" && (relative == "opencode.json" || relative == "opencode.jsonc")
+	case "gemini":
+		valid = relative == filepath.Join(".gemini", "settings.json")
+	case "continue":
+		valid = scope == "user" && relative == filepath.Join(".continue", "config.yaml")
+	case "cline":
+		valid = scope == "user" && relative == filepath.Join("settings", "providers.json")
 	}
 	if !valid {
 		return nil, errors.New("所选路径不符合客户端与 scope 的配置合同；不会操作其他文件")
@@ -946,7 +1069,7 @@ func openClientSelectedFile(root, path string) (*clientTarget, error) {
 	name := filepath.Base(relative)
 	// Explicit override selections are config files only; authentication files,
 	// .env, browser stores, and arbitrary extension databases are never inputs.
-	allowed := name == "config.toml" || name == "settings.json" || name == "settings.local.json" || name == "managed-settings.json" || name == "opencode.json" || name == "opencode.jsonc"
+	allowed := name == "config.toml" || name == "settings.json" || name == "settings.local.json" || name == "managed-settings.json" || name == "opencode.json" || name == "opencode.jsonc" || name == "config.yaml"
 	if !allowed {
 		return nil, errors.New("只允许选定客户端的配置文件")
 	}
@@ -1114,6 +1237,9 @@ type clientDocument struct {
 
 func parseClientDocument(kind, path string, b []byte, exists bool) (*clientDocument, error) {
 	d := &clientDocument{kind: kind, path: path, raw: append([]byte(nil), b...), values: map[string]any{}}
+	if kind == "continue" {
+		return parseContinueDocument(d, b, exists)
+	}
 	if kind == "codex" {
 		if exists {
 			if err := toml.Unmarshal(b, &d.values); err != nil {
@@ -1124,10 +1250,13 @@ func parseClientDocument(kind, path string, b []byte, exists bool) (*clientDocum
 	}
 	if !exists {
 		b = []byte("{}\n")
+		if kind == "cline" {
+			b = []byte("{\"version\":1,\"modes\":{},\"providers\":{}}\n")
+		}
 		d.raw = b
 	}
-	if kind == "claude" && !json.Valid(b) {
-		return nil, errors.New("Claude settings 必须为 JSON")
+	if (kind == "claude" || kind == "gemini" || kind == "cline") && !json.Valid(b) {
+		return nil, errors.New("客户端配置必须为 JSON")
 	}
 	v, err := hujson.Parse(b)
 	if err != nil {
@@ -1143,6 +1272,9 @@ func parseClientDocument(kind, path string, b []byte, exists bool) (*clientDocum
 	canonical.Standardize()
 	if err = json.Unmarshal(canonical.Pack(), &d.values); err != nil {
 		return nil, err
+	}
+	if kind == "cline" && d.values["version"] != float64(1) {
+		return nil, errors.New("Cline providers 配置须为官方 version 1 格式")
 	}
 	d.json = &v
 	return d, nil
@@ -1191,6 +1323,10 @@ func (d *clientDocument) field(path []string) (string, bool, error) {
 		return "", present, err
 	}
 	text, ok := value.(string)
+	if d.kind == "continue" && len(path) >= 3 && path[0] == "models" && (path[2] == "roles" || path[2] == "useResponsesApi" || len(path) == 5 && path[2] == "requestOptions" && path[3] == "extraBodyProperties") {
+		encoded, e := json.Marshal(value)
+		return string(encoded), true, e
+	}
 	if !ok {
 		return "", true, errors.New("字段不是字符串")
 	}
@@ -1215,6 +1351,9 @@ func (d *clientDocument) missingParents(fields []clientField) [][]string {
 func (d *clientDocument) edit(fields []clientField, prune [][]string) ([]byte, error) {
 	if d.kind == "codex" {
 		return d.editTOML(fields, prune)
+	}
+	if d.kind == "continue" {
+		return d.editContinue(fields, prune)
 	}
 	v := d.json.Clone()
 	for _, field := range fields {
@@ -1467,6 +1606,14 @@ func clientTOMLSpans(b []byte) (map[string]clientTOMLSpan, map[string]int, int, 
 
 func clientDocumentBlockers(kind string, doc *clientDocument) []string {
 	var blockers []string
+	if kind == "cline" {
+		for _, path := range [][]string{{"providers", "openai-compatible", "settings", "apiKey"}, {"providers", "openai-compatible", "settings", "auth"}} {
+			value, present, err := doc.lookup(path)
+			if err != nil || present && value != nil && value != "" {
+				blockers = append(blockers, "所选 openai-compatible 已有持久凭据，优先于环境变量 Key；请选择独立 CLINE_DATA_DIR。原凭据不读取到响应、不修改。")
+			}
+		}
+	}
 	if kind == "claude" {
 		for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
 			value, present, err := doc.field([]string{"env", name})

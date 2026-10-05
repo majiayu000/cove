@@ -270,6 +270,84 @@ func TestCompatSubscriptionChatNonstream(t *testing.T) {
 	}
 }
 
+func TestCompatMessagesMetadataRequiresDisclosedAdjustment(t *testing.T) {
+	var calls atomic.Int32
+	a := contractApp(t, func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		if r.Header.Get("Anthropic-Beta") != "" {
+			t.Error("Anthropic beta forwarded to a different protocol")
+		}
+		b, _ := io.ReadAll(r.Body)
+		if bytes.Contains(b, []byte("metadata")) || bytes.Contains(b, []byte("private-client-user")) {
+			t.Error("Anthropic metadata forwarded without an equivalent contract")
+		}
+		if !bytes.Contains(b, []byte(`"reasoning":{"effort":"high"}`)) {
+			t.Error("declared effort mapping not forwarded")
+		}
+		return contractResponse(compatWire(), "text/event-stream"), nil
+	})
+	s, _ := a.Store.source("source")
+	s.Kind, s.AuthStatus = "codex_subscription", "logged_in"
+	if err := a.Store.saveSource(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Secrets.Put(s.CredentialRef, encode(Credential{Access: "synthetic", Account: "account", Expires: time.Now().Add(time.Hour)})); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"model":"fixture-model","max_tokens":128,"metadata":{"user_id":"private-client-user"},"output_config":{"effort":"high"},"messages":[{"role":"user","content":"test"},{"role":"system","content":"mid-conversation instruction"}]}`
+	if w := compatCall(a, "/v1/messages", body, "test-client-key"); w.Code != 422 || calls.Load() != 0 {
+		t.Fatal("metadata adjustment accepted without consent")
+	}
+	s.AllowParameterAdjustment = true
+	if err := a.Store.saveSource(s); err != nil {
+		t.Fatal(err)
+	}
+	for _, replacement := range []string{`{"user_id":17}`, `{"user_id":"private-client-user","unknown":true}`, `null`} {
+		w := compatCall(a, "/v1/messages", strings.Replace(body, `{"user_id":"private-client-user"}`, replacement, 1), "test-client-key")
+		if w.Code < 400 || calls.Load() != 0 {
+			t.Fatal("invalid or unknown metadata accepted")
+		}
+	}
+	for _, replacement := range []string{`{"effort":17}`, `{"effort":"high","format":{}}`, `null`, `{}`} {
+		w := compatCall(a, "/v1/messages", strings.Replace(body, `{"effort":"high"}`, replacement, 1), "test-client-key")
+		if w.Code < 400 || calls.Load() != 0 {
+			t.Fatal("invalid or unknown output_config accepted")
+		}
+	}
+	for _, replacement := range []string{`[{"type":"tool_removal","tool":{"type":"tool_reference","name":"Bash"}}]`, `[{"type":"text","text":"instruction","clear_at":"turn_end"}]`} {
+		w := compatCall(a, "/v1/messages", strings.Replace(body, `"mid-conversation instruction"`, replacement, 1), "test-client-key")
+		if w.Code < 400 || calls.Load() != 0 {
+			t.Fatal("system tool mutation/clear_at semantics silently lost")
+		}
+	}
+	withBeta := func(beta string) *httptest.ResponseRecorder {
+		req := contractRequest("POST", "/v1/messages", body, "test-client-key")
+		req.Header.Set("Anthropic-Beta", beta)
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, req)
+		return w
+	}
+	for _, beta := range []string{"interleaved-thinking-2025-05-14", "context-management-2025-06-27", "claude-code-20250219,unknown-beta"} {
+		if w := withBeta(beta); w.Code != 422 || calls.Load() != 0 {
+			t.Fatal("unmapped beta was silently stripped")
+		}
+	}
+	w := withBeta("claude-code-20250219,effort-2025-11-24,mid-conversation-system-2026-04-07")
+	if w.Code != 200 || !strings.Contains(w.Header().Get("X-Cove-Compatibility"), "anthropic_metadata_not_forwarded") || !strings.Contains(w.Header().Get("X-Cove-Compatibility"), "anthropic_effort_mapped") {
+		t.Fatalf("adjustment not disclosed: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Header().Get("X-Cove-Compatibility"), "anthropic_system_message_mapped") {
+		t.Fatal("system message mapping not disclosed")
+	}
+	if !strings.Contains(w.Header().Get("X-Cove-Compatibility"), "anthropic_beta_not_forwarded") {
+		t.Fatal("beta adjustment not disclosed")
+	}
+	record := waitRecords(t, a, 1)[0]
+	if !strings.Contains(encode(record.Adjustments), "anthropic_metadata_not_forwarded") || strings.Contains(encode(record), "private-client-user") {
+		t.Fatal("adjustment record missing or contains private metadata")
+	}
+}
+
 func TestCompatRejectedBeforeDispatch(t *testing.T) {
 	var calls atomic.Int32
 	a := contractApp(t, func(r *http.Request) (*http.Response, error) {

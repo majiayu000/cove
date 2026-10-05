@@ -21,12 +21,18 @@ func clientFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	versions := map[string]string{"codex": "codex-cli 0.158.0", "claude": "2.1.281 (Claude Code)", "opencode": "1.18.33"}
+	versions := map[string]string{"codex": "codex-cli 0.158.0", "claude": "2.1.281 (Claude Code)", "opencode": "1.18.33", "gemini": "0.62.0", "code": "Continue.continue@1.3.40", "cline": "3.0.68"}
 	for name, version := range versions {
 		installClientVersionFixture(t, bin, name, version)
 	}
 	t.Setenv("PATH", bin)
 	for _, key := range []string{"CODEX_HOME", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR"} {
+		t.Setenv(key, "")
+	}
+	for _, key := range []string{"GEMINI_MODEL", "GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_VERSION"} {
+		t.Setenv(key, "")
+	}
+	for _, key := range []string{"CLINE_PROVIDER_SETTINGS_PATH", "CLINE_DATA_DIR", "OPENAI_API_KEY"} {
 		t.Setenv(key, "")
 	}
 	return f
@@ -71,6 +77,35 @@ func TestSpecClientConfigVerifiedCodex0160(t *testing.T) {
 		t.Fatal("current client configuration was not applied")
 	}
 }
+
+func TestSpecGeminiClientConfigRestorePreservesUserChanges(t *testing.T) {
+	f := clientFixture(t)
+	root := clientRoot(t)
+	path := filepath.Join(root, ".gemini", "settings.json")
+	writeClient(t, path, `{"model":{"name":"before"},"security":{"auth":{"selectedType":"oauth-personal"}},"ui":{"theme":"original"}}`)
+	auth := filepath.Join(root, ".gemini", "oauth_creds.json")
+	writeClient(t, auth, "SENTINEL_OFFICIAL_GOOGLE_LOGIN")
+	p := clientPreviewFor(t, f.a, "gemini", "project", root, path)
+	if p.RequiredSecret["env_name"] != "GEMINI_API_KEY" {
+		t.Fatal("incorrect Gemini credential delivery")
+	}
+	c := clientApply(t, f.a, p)
+	var applied map[string]any
+	if json.Unmarshal(readClient(t, path), &applied) != nil || applied["model"].(map[string]any)["name"] != "coding" {
+		t.Fatal("Gemini model not applied")
+	}
+	applied["ui"].(map[string]any)["theme"] = "user-after-apply"
+	writeClient(t, path, encode(applied))
+	rp := clientRestorePreviewFor(t, f.a, c)
+	clientRestore(t, f.a, c, rp, nil)
+	var restored map[string]any
+	if json.Unmarshal(readClient(t, path), &restored) != nil || restored["model"].(map[string]any)["name"] != "before" || restored["security"].(map[string]any)["auth"].(map[string]any)["selectedType"] != "oauth-personal" || restored["ui"].(map[string]any)["theme"] != "user-after-apply" {
+		t.Fatal("Gemini restoration lost original auth or user changes")
+	}
+	if string(readClient(t, auth)) != "SENTINEL_OFFICIAL_GOOGLE_LOGIN" {
+		t.Fatal("Google login file changed")
+	}
+}
 func clientPreviewFor(t *testing.T, a *App, kind, scope, root, path string) clientPreview {
 	t.Helper()
 	status, b := clientRequest(t, a, "/admin/clients/"+kind+"/preview", clientConfigInput{Scope: scope, Root: root, Path: path, Model: "coding"})
@@ -88,7 +123,7 @@ func clientPreviewFor(t *testing.T, a *App, kind, scope, root, path string) clie
 }
 func clientApply(t *testing.T, a *App, p clientPreview) clientChange {
 	t.Helper()
-	status, b := clientRequest(t, a, "/admin/client-changes", clientApplyInput{PreviewID: p.ID, BaseHashes: map[string]string{p.Files[0].Path: p.Files[0].BaseHash}, SecretDelivery: "env_reference"})
+	status, b := clientRequest(t, a, "/admin/client-changes", clientApplyInput{PreviewID: p.ID, BaseHashes: map[string]string{p.Files[0].Path: p.Files[0].BaseHash}, SecretDelivery: p.RequiredSecret["mode"].(string)})
 	if status != 201 {
 		t.Fatalf("apply %d: %s", status, b)
 	}

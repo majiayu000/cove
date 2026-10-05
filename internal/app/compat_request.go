@@ -30,6 +30,8 @@ type compatRequest struct {
 	} `json:"stream_options"`
 	System         json.RawMessage `json:"system"`
 	ResponseFormat json.RawMessage `json:"response_format"`
+	Metadata       json.RawMessage `json:"metadata"`
+	OutputConfig   json.RawMessage `json:"output_config"`
 }
 type compatMessage struct {
 	Role       string          `json:"role"`
@@ -100,6 +102,50 @@ func compatInput(raw []byte, protocol string, src Source) (map[string]json.RawMe
 	if in.StreamOptions != nil && !in.Stream {
 		return nil, nil, errors.New("stream_options 仅适用于流式请求")
 	}
+	metadataAdjusted := false
+	effortAdjusted := ""
+	if len(in.OutputConfig) > 0 {
+		if protocol != "messages" {
+			return nil, nil, unsupportedFeature("output_config 仅适用于 Messages")
+		}
+		var config struct {
+			Effort string `json:"effort"`
+		}
+		if !jsonObject(in.OutputConfig) {
+			return nil, nil, errors.New("output_config 必须是对象")
+		}
+		if err := strictJSON(in.OutputConfig, &config); err != nil {
+			return nil, nil, err
+		}
+		if config.Effort == "" {
+			return nil, nil, errors.New("output_config.effort 必填")
+		}
+		if src.Kind != "codex_subscription" || !src.AllowParameterAdjustment {
+			return nil, nil, unsupportedFeature("Anthropic effort 转换需要来源允许参数调整；同名等级不保证相同思考量")
+		}
+		effortAdjusted = config.Effort
+	}
+	if len(in.Metadata) > 0 {
+		if protocol != "messages" {
+			return nil, nil, unsupportedFeature("Chat 兼容入口不支持 metadata，请使用原生 Responses")
+		}
+		var metadata struct {
+			UserID *string `json:"user_id"`
+		}
+		if !jsonObject(in.Metadata) {
+			return nil, nil, errors.New("Messages metadata 必须是对象")
+		}
+		if err := strictJSON(in.Metadata, &metadata); err != nil {
+			return nil, nil, err
+		}
+		if metadata.UserID != nil && len([]rune(*metadata.UserID)) > 512 {
+			return nil, nil, errors.New("Messages metadata.user_id 最长为 512 个字符")
+		}
+		if src.Kind != "codex_subscription" || !src.AllowParameterAdjustment {
+			return nil, nil, unsupportedFeature("订阅无法转发 Anthropic metadata.user_id；请在来源设置中启用参数调整，或使用原生 Messages 来源")
+		}
+		metadataAdjusted = true
+	}
 	if protocol == "messages" {
 		if in.MaxTokens == nil || *in.MaxTokens <= 0 {
 			return nil, nil, errors.New("Messages 兼容入口要求正整数 max_tokens；不支持仅填充缓存")
@@ -114,7 +160,13 @@ func compatInput(raw []byte, protocol string, src Source) (map[string]json.RawMe
 		return nil, nil, errors.New("Chat 请通过 system/developer 消息提供指令")
 	}
 	items := []any{}
-	addText := func(role, text string) { items = append(items, map[string]any{"role": role, "content": text}) }
+	systemMessageAdjusted := false
+	addText := func(role, text string) {
+		if role == "system" && chatGPTDirectSource(src) {
+			role = "developer"
+		}
+		items = append(items, map[string]any{"role": role, "content": text})
+	}
 	if len(in.System) > 0 {
 		txt, err := compatText(in.System)
 		if err != nil {
@@ -124,7 +176,13 @@ func compatInput(raw []byte, protocol string, src Source) (map[string]json.RawMe
 	}
 	for _, m := range in.Messages {
 		if protocol == "messages" {
-			if m.Role != "user" && m.Role != "assistant" || len(m.ToolCalls) > 0 || m.ToolCallID != "" || m.Refusal != nil {
+			if m.Role == "system" {
+				if src.Kind != "codex_subscription" || !src.AllowParameterAdjustment {
+					return nil, nil, unsupportedFeature("Messages 中途 system 指令转换需要来源允许参数调整；工具增删与 turn-scoped 清理不支持")
+				}
+				systemMessageAdjusted = true
+			}
+			if m.Role != "user" && m.Role != "assistant" && m.Role != "system" || len(m.ToolCalls) > 0 || m.ToolCallID != "" || m.Refusal != nil {
 				return nil, nil, errors.New("Messages 只接受 user/assistant 和内容块工具历史")
 			}
 			var text string
@@ -234,6 +292,9 @@ func compatInput(raw []byte, protocol string, src Source) (map[string]json.RawMe
 	if in.ReasoningEffort != "" {
 		out["reasoning"] = json.RawMessage(encode(map[string]string{"effort": in.ReasoningEffort}))
 	}
+	if effortAdjusted != "" {
+		out["reasoning"] = json.RawMessage(encode(map[string]string{"effort": effortAdjusted}))
+	}
 	if len(in.ResponseFormat) > 0 {
 		var format struct {
 			Type   string `json:"type"`
@@ -334,6 +395,15 @@ func compatInput(raw []byte, protocol string, src Source) (map[string]json.RawMe
 		}
 	}
 	adapter := &compatOutput{protocol: protocol, stream: in.Stream, model: in.Model, includeUsage: in.StreamOptions != nil && in.StreamOptions.IncludeUsage, blocks: map[string]*compatBlock{}}
+	if metadataAdjusted {
+		adapter.adjustments = append(adapter.adjustments, "anthropic_metadata_not_forwarded")
+	}
+	if effortAdjusted != "" {
+		adapter.adjustments = append(adapter.adjustments, "anthropic_effort_mapped")
+	}
+	if systemMessageAdjusted {
+		adapter.adjustments = append(adapter.adjustments, "anthropic_system_message_mapped")
+	}
 	if src.Kind == "codex_subscription" && limit != nil {
 		adapter.adjustments = append(adapter.adjustments, "output_limit_not_enforced")
 	}

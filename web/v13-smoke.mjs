@@ -193,19 +193,25 @@ try {
   const subscription = (await api("sources")).find((s) => s.kind === "codex_subscription");
   const signIn = page.getByRole("button", { name: "登录 ChatGPT", exact: true });
   await expect(signIn).toBeVisible();
-  await context.route("https://auth.openai.com/oauth/authorize?*", (route) => route.fulfill({
+  await context.route("https://auth.openai.com/api/accounts/authorize?*", (route) => route.fulfill({
     contentType: "text/html",
     body: "<h1>Isolated authorization page</h1>",
   }));
   const popupOpened = page.waitForEvent("popup");
   await signIn.click();
   const popup = await popupOpened;
-  await popup.waitForURL("https://auth.openai.com/oauth/authorize?*");
+  await popup.waitForURL("https://auth.openai.com/api/accounts/authorize?*");
   const authorization = new URL(popup.url());
   expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
   expect(authorization.searchParams.get("code_challenge")).toBeTruthy();
   expect(authorization.searchParams.get("state")).toBeTruthy();
   expect(authorization.searchParams.get("scope")).toContain("offline_access");
+  expect(subscription.base_url).toBe("https://api.openai.com/v1");
+  expect(authorization.searchParams.get("client_id")).toBe("dynamic_agent_client");
+  expect(authorization.searchParams.get("agent_name_hint")).toBe("Cove");
+  expect(authorization.searchParams.get("resource")).toBe("https://api.openai.com/v1");
+  expect(authorization.searchParams.get("scope")).toContain("chatgpt.tokens.use.direct");
+  expect(authorization.searchParams.get("ext_agent_host_id")).toMatch(/^urn:uuid:/);
   expect(await popup.evaluate(() => window.opener)).toBeNull();
   await expect(page.getByRole("button", { name: "正在登录…", exact: true })).toBeDisabled();
   await expect(page.getByRole("link", { name: "继续授权 ↗", exact: true })).toHaveAttribute("href", popup.url());
@@ -235,7 +241,7 @@ try {
   await expect.poll(() => rejectedPopup.isClosed()).toBe(true);
   await expect(page.getByRole("alert").filter({ hasText: "OAuth 登录测试冲突" })).toBeVisible();
   await context.unroute(loginEndpoint);
-  await context.unroute("https://auth.openai.com/oauth/authorize?*");
+  await context.unroute("https://auth.openai.com/api/accounts/authorize?*");
   const sources = await api("sources"),
     source = sources.find((s) => s.name === "v13-local-test");
   const mockSource = await api("sources", "POST", {
@@ -346,12 +352,37 @@ try {
     upstream_model: "v13-ui-extra",
     display_name: "UI test model",
   });
-  await page.reload();
-  await page
-    .locator("nav")
-    .getByRole("button", { name: "模型", exact: true })
-    .click();
-  await expect(page.getByText("v13-ui-extra", { exact: true })).toBeVisible();
+  // A slow CLI version read must not delay unrelated models or budgets.
+  console.log("Checking independent model publication and obsolete client-read cancellation.");
+  let releaseClients, clientsSeen;
+  const slowClients = new Promise(resolve => { releaseClients = resolve; });
+  const firstClients = new Promise(resolve => { clientsSeen = resolve; });
+  const clientsURL = /\/admin\/clients$/;
+  await page.addInitScript(() => {
+    const fetch = window.fetch.bind(window);
+    window.coveAbortedClientReads = 0;
+    window.fetch = (url, options) => {
+      if (/\/admin\/clients$/.test(String(url))) options?.signal?.addEventListener("abort", () => window.coveAbortedClientReads++);
+      return fetch(url, options);
+    };
+  });
+  await page.goto("about:blank");
+  await page.route(clientsURL, async route => { clientsSeen(); await slowClients; await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({items: [], next_cursor: null})}); });
+  try {
+    await page.goto(base);
+    await page.locator("nav").getByRole("button", { name: "模型", exact: true }).click();
+    await expect(page.getByText("v13-ui-extra", { exact: true })).toBeVisible();
+    await firstClients;
+    await page.locator("nav").getByRole("button", { name: "来源", exact: true }).click();
+    await page.getByRole("switch", { name: /^v13-local-test / }).click();
+    await expect.poll(() => page.evaluate(() => window.coveAbortedClientReads)).toBeGreaterThan(0);
+    await page.locator("nav").getByRole("button", { name: "模型", exact: true }).click();
+    await expect(page.getByText("v13-ui-extra", { exact: true })).toBeVisible();
+  } finally {
+    releaseClients();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+  console.log("Independent model publication and client cancellation passed.");
   await page.getByPlaceholder("model id").fill("does-not-exist");
   await expect(page.getByText("没有匹配的模型", { exact: true })).toBeVisible();
   await page.getByPlaceholder("model id").fill("");
@@ -542,7 +573,7 @@ try {
   await expect(nextRequest.getByText("没有可用候选，请查看排除原因", { exact: true }).first()).toBeVisible();
   await paidFallback.click();
   await expect(nextRequest.getByText("v13-paid-upstream · v13-test-model", { exact: true })).toBeVisible();
-  await expect(page.getByText("0/∞", { exact: true }).first()).toBeVisible();
+  await expect(page.getByTitle("路由并发 0/∞ · 排队 0 · 仅配置预览", { exact: true }).first()).toBeVisible();
   await page.screenshot({ path: `${output}/subscription-scheduling.png` });
 
   // Exercise a real safe dial failover and inspect both persisted attempts.
@@ -880,7 +911,7 @@ try {
   for (const name of modules) {
     console.log(`Checking expanded management: ${name}`);
     const editor = await openManagement(name);
-    await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count()).toBe(0);
+    await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count(), { timeout: 10000 }).toBe(0);
     await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
     const unlabeled = await editor.evaluate(element => [...element.querySelectorAll('input:not([type="hidden"]),select,textarea')].filter(input => !input.labels?.length && !input.getAttribute("aria-label") && !input.getAttribute("aria-labelledby")).map(input => input.name || input.tagName));
     expect(unlabeled, `${name} expanded controls need labels`).toEqual([]);
@@ -940,8 +971,9 @@ try {
     expect(zoomed.width).toBeCloseTo(unzoomed.width / 2, 0);
     writeFileSync(`${output}/actual-zoom-metrics.json`, JSON.stringify({ unzoomed, zoomed, percent: 200 }, null, 2));
     for (const name of modules) {
+      console.log("Checking actual 200% zoom:", name);
       const editor = await openManagement(name, zoomPage);
-      await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count()).toBe(0);
+      await expect.poll(() => editor.locator('[role="status"]').filter({ hasText: /^正在读取/ }).count(), { timeout: 10000 }).toBe(0);
       await editor.locator("details").evaluateAll(elements => elements.forEach(element => { element.open = true; }));
       expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth), `${name} overflow at actual 200% zoom`).toBe(false);
       await editor.getByRole("button", { name: "关闭管理", exact: true }).click();

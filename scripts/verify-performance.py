@@ -1,5 +1,7 @@
 """Native isolated performance evidence, synthetic loopback upstream only."""
 import argparse
+import hashlib
+import shutil
 import concurrent.futures
 from datetime import datetime, timezone
 import json
@@ -8,7 +10,6 @@ from pathlib import Path
 import platform
 import socket
 import sqlite3
-import statistics
 import subprocess
 import tempfile
 import threading
@@ -22,9 +23,19 @@ HTTP = build_opener(ProxyHandler({}))
 def percentile(values, p=.95):
     return sorted(values)[min(len(values)-1, int(len(values)*p))]
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0)); return s.getsockname()[1]
+def free_port(start, excluded=()):
+    for port in range(start, 65536):
+        if port in excluded or port in (3000, 3001, 4000, 5000, 5173, 8000, 8080, 8888):
+            continue
+        if shutil.which('lsof') and subprocess.run(['lsof', '-nP', '-iTCP:'+str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            continue
+        try:
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', port))
+            return port
+        except OSError:
+            continue
+    raise RuntimeError('No available performance port')
 
 class Upstream(BaseHTTPRequestHandler):
     duration = 1800
@@ -52,16 +63,20 @@ def main():
     parser.add_argument('--binary', default=str(ROOT/'bin/gatt'))
     parser.add_argument('--duration',type=int,default=1800)
     parser.add_argument('--rows',type=int,default=1000000)
+    parser.add_argument('--port-start',type=int,default=5567)
     parser.add_argument('--output',default=str(ROOT/'test-results/performance-v12.json'))
     args=parser.parse_args()
     result={'synthetic_only':True,'os':platform.platform(),'arch':platform.machine(),'cpu':platform.processor(),'logical_cpus':os.cpu_count(),'duration_seconds':args.duration,'workers':8,'metadata_rows':args.rows}
     result['ram_bytes']=int(subprocess.check_output(['sysctl','-n','hw.memsize'],text=True).strip()) if platform.system()=='Darwin' else os.sysconf('SC_PAGE_SIZE')*os.sysconf('SC_PHYS_PAGES')
+    result['go_version']=subprocess.check_output(['go','version'],text=True).strip()
+    result['binary_sha256']=hashlib.sha256(Path(args.binary).read_bytes()).hexdigest()
+    if platform.system()=='Darwin': result['cpu']=subprocess.check_output(['sysctl','-n','machdep.cpu.brand_string'],text=True).strip()
     Upstream.duration=args.duration
-    upstream=ThreadingHTTPServer(('127.0.0.1',0),Upstream);upstream.daemon_threads=True
+    upstream=ThreadingHTTPServer(('127.0.0.1',free_port(args.port_start)),Upstream);upstream.daemon_threads=True
     threading.Thread(target=upstream.serve_forever,daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='cove-performance-') as temp:
         temp=Path(temp);data=temp/'data';config=temp/'config.json'
-        cfg=json.loads((ROOT/'config.example.json').read_text());cfg.update(listen='127.0.0.1:'+str(free_port()),data_dir=str(data),max_concurrent=8,total_timeout_seconds=args.duration+60)
+        cfg=json.loads((ROOT/'config.example.json').read_text());cfg.update(listen='127.0.0.1:'+str(free_port(args.port_start,(upstream.server_port,))),data_dir=str(data),max_concurrent=8,total_timeout_seconds=args.duration+60)
         config.write_text(json.dumps(cfg));base='http://'+cfg['listen'];provider='http://127.0.0.1:'+str(upstream.server_port)
         process=None
         def launch():
@@ -83,22 +98,27 @@ def main():
             account=admin('accounts','POST',{'provider':'openai_compatible','auth_type':'api_key','name':'Synthetic performance'},session)
             admin('accounts/'+account['id']+'/credential','POST',{'version':account['version'],'secret':'performance-synthetic-secret'},session)
             source=admin('sources','POST',{'account_id':account['id'],'name':'Synthetic source','base_url':provider,'models':['synthetic-model']},session)
-            key=admin('client-keys','POST',{'source_id':source['id'],'name':'Synthetic client'},session)['secret']
+            key=admin('client-keys','POST',{'source_id':source['id'],'name':'Synthetic client'},session)
+            key_id=key['key']['id'];key=key['secret']
             def stream(target,credential,kind):
-                began=time.monotonic();first=None;count=0
+                began=time.monotonic();first=None;count=0;completed=False
                 req=Request(target+'/v1/responses',data=json.dumps({'model':'synthetic-model','input':kind,'stream':True}).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+credential})
                 with HTTP.open(req,timeout=args.duration+60) as response:
                     for line in response:
                         count+=len(line)
+                        if line.startswith(b'data:') and b'response.completed' in line: completed=True
                         if first is None and b'response.output_text.delta' in line and line.startswith(b'data:'):
                             first=(time.monotonic()-began)*1000
                         if kind=='cancel' and first is not None: break
-                return {'first_content_ms':first,'bytes':count}
+                assert first is not None, 'No semantic streaming content'
+                assert kind=='cancel' or completed, 'Missing terminal streaming completion'
+                return {'first_content_ms':first,'bytes':count,'completed':completed}
             paired=[]
             for _ in range(100):
                 direct=stream(provider,'performance-synthetic-secret','ttft');gateway=stream(base,key,'ttft')
                 paired.append(gateway['first_content_ms']-direct['first_content_ms'])
             result['additional_ttft_p95_ms']=percentile(paired)
+            result['rss_before_kib']=int(subprocess.check_output(['ps','-o','rss=','-p',str(process.pid)],text=True).strip())
             rss=[];began=time.monotonic()
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                 futures=[pool.submit(stream,base,key,'soak') for _ in range(8)]
@@ -115,23 +135,41 @@ def main():
             result['rss_growth_kib']=max(v['rss_kib'] for v in rss)-min(v['rss_kib'] for v in rss)
             process.terminate();process.wait(timeout=10);process=None
             with sqlite3.connect(data/'gatt.db') as db:
-                now=time.time();payload={'source_id':source['id'],'client_key_id':'synthetic-key','requested_model':'synthetic-model','protocol':'responses','status':'succeeded','origin':'client','usage':{'input_tokens':10,'output_tokens':2},'duration_ms':5,'observation_status':'complete','upstream_status':'completed','delivery_status':'completed'}
+                now=time.time();payload={'source_id':source['id'],'client_key_id':key_id,'requested_model':'synthetic-model','protocol':'responses','route_id':'synthetic-route','status':'succeeded','origin':'client','usage':{'input_tokens':10,'output_tokens':2},'duration_ms':5,'usage_completeness':'complete','account_id':account['id'],'observation_status':'complete','upstream_status':'completed','delivery_status':'completed'}
                 def rows():
                     for i in range(args.rows):
                         identity=f'perf-row-{i:08}'
                         started=datetime.fromtimestamp(now-1-i*.01,timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-                        yield identity,source['id'],started,'succeeded',json.dumps({**payload,'id':identity,'started_at':started,'ended_at':started})
+                        yield identity,source['id'],started,'succeeded',json.dumps({**payload,'client_key_id':key_id if i%1000 else 'rare-key','requested_model':'synthetic-model' if i%1000 else 'rare-model','id':identity,'started_at':started,'ended_at':started})
                 db.executemany('INSERT INTO requests(id,source_id,started,status,data) VALUES(?,?,?,?,?)',rows())
+                db.execute("INSERT INTO attempts(id,request_id,sequence,source_id,account_id,data) SELECT 'attempt-'||id,id,1,?,?,json_object('id','attempt-'||id,'request_id',id,'source_id',?,'account_id',?,'status','succeeded') FROM requests WHERE id LIKE 'perf-row-%'",(source['id'],account['id'],source['id'],account['id']))
                 result['seed_seconds']=time.time()-now
             process=launch();session=admin('session','POST',{})['session_token'];timings=[]
             for _ in range(30):
                 started=time.monotonic();page=admin('requests?limit=50',session=session);timings.append((time.monotonic()-started)*1000)
                 assert len(page['items'])<=50
             result['request_first_page_p95_ms']=percentile(timings)
-            result['checks']={'eight_streams_finished':len(result['streams'])==8,'cancel_within_5s':result['cancel_release_seconds']<5,'request_first_page_p95_under_300ms':result['request_first_page_p95_ms']<300,'additional_ttft_p95_under_20ms':result['additional_ttft_p95_ms']<20,'rss_growth_under_64MiB':result['rss_growth_kib']<65536}
+            queries={'all':'requests?limit=50','key':'requests?limit=50&client_key_id='+key_id,'rare_key':'requests?limit=50&client_key_id=rare-key','rare_model':'requests?limit=50&model=rare-model','missing_model':'requests?limit=50&model=missing-model','source':'requests?limit=50&source_id='+source['id'],'account':'requests?limit=50&account_id='+account['id'],'protocol':'requests?limit=50&protocol=responses','route':'requests?limit=50&route_id=synthetic-route','state':'requests?limit=50&status=succeeded'}
+            result['request_query_p95_ms']={}
+            for name,path in queries.items():
+                samples=[]
+                for _ in range(20):
+                    started=time.monotonic();page=admin(path,session=session);samples.append((time.monotonic()-started)*1000)
+                    assert len(page['items'])<=50
+                    if name=='missing_model': assert not page['items']
+                result['request_query_p95_ms'][name]=percentile(samples)
+            started=time.monotonic();usage=admin('usage',session=session)
+            result['usage_aggregate_ms']=(time.monotonic()-started)*1000
+            assert usage['requests']>=args.rows and usage['known_input_tokens']>=args.rows*10
+            result['rss_return_delta_kib']=result['rss_after_kib']-result['rss_before_kib']
+            result['checks']={'eight_streams_finished':len(result['streams'])==8,'cancel_within_5s':result['cancel_release_seconds']<5,'request_first_page_p95_under_300ms':result['request_first_page_p95_ms']<300,'filtered_pages_p95_under_300ms':all(value<300 for value in result['request_query_p95_ms'].values()),'rss_return_within_64MiB':result['rss_return_delta_kib']<65536,'additional_ttft_p95_under_20ms':result['additional_ttft_p95_ms']<20,'rss_growth_under_64MiB':result['rss_growth_kib']<65536}
             output=Path(args.output);output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n')
             print(json.dumps({'output':str(output),'build_id':result['build_id'],'checks':result['checks']},indent=2))
             if not all(result['checks'].values()): raise AssertionError('performance threshold not met; inspect actual evidence')
+        except Exception as error:
+            result['error']=type(error).__name__+': '+str(error)
+            output=Path(args.output);output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n')
+            raise
         finally:
             if process and process.poll() is None: process.terminate();process.wait(timeout=10)
             upstream.shutdown();upstream.server_close()

@@ -1,6 +1,6 @@
 # Cove 外部适配合同 · v1.2
 
-日期 2026-09-30。本文是主 Spec 第27、30、31、35节的规范附件。只补设计，不修改产品代码、真实凭据、客户端配置或运行服务。公开源码能证明字段和流程；不能证明 Cove 已取得独立客户端准入、当前账号有资格，或实际调用通过。
+初稿日期 2026-09-30，2026-10-05补充实现状态。本文是主 Spec 第27、30、31、35节的规范附件。最初的源码快照和合成样例属于设计证据；以下注明的新实现与真实验收分别记录，不能沿用旧快照冒充运行结果。公开源码能证明字段和流程；不能证明 Cove 已取得独立客户端准入、当前账号有资格，或实际调用通过。
 
 ## 1. 证据、版本和完成口径
 
@@ -13,6 +13,7 @@
 | Gemini CLI | `d75234cae935d58f896f4dbf305e0c51602fa385`；package `0.63.0-nightly.20260923.gf50ba8608` | CodeAssist项目、quota、API key自定义endpoint |
 | Qwen Code | `a63157304aeccafed6a700bd9566ccd84cf1edfa`；`0.24.7` | 历史device wire与现行停用说明，二者分别保留 |
 | OpenCode | `7945de208964a49300d7f770d1a71d078db9a4c4`；`1.18.33` | JSON/JSONC provider配置 |
+| Cline CLI | `3.0.68`；官方 npm 包及 `@cline/core 0.0.90` | 所选 providers.json、实际 SDK 解析与真实 CLI 工具两回合；见本节新增证据 |
 | Cline VS Code | `647d8cb059f5083c53d959609ce04c82647ae0d6`；`4.1.21` | 模型字段、SecretStorage、MCP及Skills |
 | Roo Code | `b867ec9145750d0ae1ff7f02d35406e9bf2a0b16`；`3.53.0` | provider profile、SecretStorage、项目MCP及Skills |
 | Continue VS Code | `5522c6f44ca0ac3528b37244818fbfa39b5af470`；`1.3.40` | YAML v1模型及MCP schema |
@@ -36,7 +37,7 @@ token成功之后先验证身份，再原子保存 credential+generation，再�
 
 | Provider | 选定授权和身份合同 | 刷新与端点隔离 | 当前准入状态和解除条件 |
 |---|---|---|---|
-| Codex订阅 | 保留现有Cove PKCE/state/nonce流程；OIDC按配置issuer/JWKS验证签名、aud、exp、nonce；以已验证账号标识绑定来源 | token只发既定token origin；Bearer和账号header只发Codex origin；不读取日常auth.json | 现有代码采用官方Codex客户端标识，**不是Cove自有注册**。保留用户现有功能；正式独立接入声明仍需Cove允许使用该客户端身份的依据；本轮不修改此配置 |
+| ChatGPT订阅 | 新来源使用官方本地开源应用注册：初次 `dynamic_agent_client`，稳定 host ID、Cove名称、PKCE/state/nonce，回调持久保存签发的client ID；随后按签发ID验证aud和subject | 授权/token在auth.openai.com，推理与目录只发api.openai.com/v1；独立账号记录和计划scope，不读取日常auth.json，不将旧Codex凭据发往公开API | 官方开放合同和本人真实Cove注册授权、目录/native工具/Codex、旋转刷新及撤销已验证；刷新测试故意将隔离副本的本地元数据置为到期，不证明自然到期时序或所有失败恢复。旧私有Codex来源保留原端点和身份，不视为Cove自有注册 |
 | Claude订阅 | 不新增可用的“用Claude登录Cove”按钮。用户自己的原版Claude Code订阅登录与Cove来源授权是不同对象 | 不收集或中转Claude.ai登录token；API来源使用x-api-key，不假称订阅刷新 | 官方文档明确第三方应用不能提供Claude.ai登录或代用户路由订阅凭据。只有供应商针对Cove的明确准入方案才能解除；API Key来源保留，不能悄悄把订阅需求改成API已完成 |
 | Gemini CLI订阅 | Cove自有Google Desktop OAuth client，authorization_code+PKCE，loopback `http://127.0.0.1:{port}/oauth2callback`；Google userinfo可信`id`作为subject，email只展示 | Google授权/token/userinfo分域；scope按固定源码为cloud-platform、userinfo.email、userinfo.profile；离线refresh；项目资格另走CodeAssist | Google Desktop OAuth的注册流程可定义；**自有client能否使用CodeAssist private API未获证明**。需注册metadata、已准入client+scope、project/eligibility成功样本，不能复制Gemini内置secret |
 | Antigravity订阅 | 与Gemini CLI不同provider/account；不共享refresh或资格；未取得官方自有client/identity/项目合同前登录返回422 | 不把Gemini CLI的project和API授权推定为Antigravity授权；认证域未明确前不发credential | 尚缺针对Cove的client/redirect/scope/audience、可信subject接口、项目/模型/额度合同。竞品cloudcode transport只作调查线索；这是实质阻塞，保留D01/D02 |
@@ -46,7 +47,15 @@ token成功之后先验证身份，再原子保存 credential+generation，再�
 
 证据：[Claude凭据使用边界](https://code.claude.com/docs/en/legal-and-compliance)、[Google桌面OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、[GitHub device及刷新](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)、[Copilot SDK自有OAuth](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/authenticate)、[Qwen现行认证](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/)、[Grok Build认证形式](https://docs.x.ai/build/enterprise)。这些是技术接入依据和产品启用决定，不将本次调查写成供应商对Cove的批准。
 
-### 2.3 Qwen历史device wire的精确记录
+### 2.3 2026-10-05 ChatGPT 自有注册实现
+
+依据 [Sign in with ChatGPT 本地开源应用合同](https://developers.openai.com/siwc/token-sharing-open-source)及[登录合同](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)，新来源选择 `https://api.openai.com/v1`，回调从初次注册起使用 `http://127.0.0.1:{port}/auth/callback`。授权路径 `/api/accounts/authorize`，请求 `resource=https://api.openai.com/v1`、身份/离线scope及 `chatgpt.tokens.use.direct`；首次用动态入口，签发ID在换码前私有保存。换码及刷新用 `/api/accounts/oauth/token` 和签发ID，不用入口ID换token。
+
+OIDC继续校验签名、issuer、aud、exp和nonce；主体来自已验证sub，不要求私有Codex账号claim。身份已登录与计划使用许可分开：缺少direct scope不派发模型调用。旧私有来源和公开来源不能共用同一账号记录。退出先关闭本地准入，再按可信发现文档的同origin revocation_endpoint尝试撤销refresh会话；失败只显示未确认，清理本地token，保留host及注册ID供重新登录。见[会话与刷新合同](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)。真实授权/刷新/撤销不能用合成测试代替。本轮本人实际成功路径见 `test-results/completion-20261005-closeout/independent-*.json`；隔离刷新测试不修改日常来源，也不将该自然到期时序标为已验。
+
+公开推理仅使用 `/responses`：流式、`store=false`、完整输入历史，文本system转换到developer时仍公开参数调整。目录使用 `/models`，只保留visibility=list并维持服务端顺序。公开合同未提供私有wham额度接口，控制台引导到ChatGPT查看；不将旧私有额度或WebSocket能力卡继承到该来源。见[模型与推理合同](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
+
+### 2.4 Qwen历史device wire的精确记录
 
 固定源码 `packages/core/src/qwen/qwenOAuth2.ts`：device为 `https://chat.qwen.ai/api/v1/oauth2/device/code`；token为同origin的 `/api/v1/oauth2/token`。表单携带client_id、scope、code_challenge、code_challenge_method=S256；轮询携带client_id、device_code、grant_type=device_code完整URN和code_verifier。返回device_code/user_code/verification_uri/verification_uri_complete/expires_in；token包含access_token、可选refresh_token、token_type、expires_in、可选scope/endpoint/resource_url。refresh响应更新access_token及有效期，若新refresh_token存在再旋转。
 
@@ -165,17 +174,31 @@ Codex独立目录是本次生成模板的输出位置，不读取日常账号数
 
 依据：[Codex配置](https://developers.openai.com/codex/config-reference)、[Claude配置scope](https://code.claude.com/docs/en/settings)、[Claude网关](https://code.claude.com/docs/en/llm-gateway)。
 
+2026-10-05实现：选择绑定订阅来源的Key时，Claude配置预览明确关闭缓存、thinking、interleaved thinking和实验功能。仅在来源允许参数调整时接受可转换的metadata.user_id、effort和文本system消息；同名effort不保证相同思考量，跨提供方指令角色也不保证相同优先级。已观测的Claude Code归属、effort和system beta头不转发，并写入响应头及请求调整记录；其他beta、thinking/签名历史、cache_control、工具增删与clear_at语义继续在上游派发前拒绝。禁用实验变量不会移除全部稳定beta，见[官方网关合同](https://code.claude.com/docs/en/llm-gateway-protocol#disable-pre-release-capabilities)。
+
+实际Claude Code 2.1.281已读取Cove生成的隔离配置，通过本人订阅完成一次printf工具及两轮请求，原配置恢复、临时Key撤销、日常来源保留均已检查。该结果不证明Anthropic原生扩展、签名思考或完整长会话支持；构建与真实结果见 `test-results/completion-20261005-closeout/installed-clients.json`。
+
 ### 5.3 OpenCode、Gemini CLI、Continue
 
 | 客户端 | 配置路径与精确字段 | 密钥、协议与恢复 |
 |---|---|---|
 | OpenCode 1.18.33快照 | 项目opencode.json/opencode.jsonc，或用户`~/.config/opencode/opencode.json`；provider.cove.npm=`@ai-sdk/openai-compatible`，name=Cove，options.baseURL=`origin/v1`，options.apiKey=`{env:COVE_API_KEY}`；models以public model id作key；model=`cove/{public-id}` | 该模板选Chat协议；Responses原生必须另用经验证的provider配置，不因npm名字相近推定等价。恢复provider.cove和model各字段；其他provider不动。配置文件同时存在时先按原生优先级报告生效位置 |
-| Gemini CLI固定nightly | 项目`.gemini/settings.json`或用户`~/.gemini/settings.json`；security.auth.selectedType=gemini-api-key，model.name={public-id}；启动环境GOOGLE_GEMINI_BASE_URL=`origin`、GOOGLE_GENAI_API_VERSION=v1beta、GEMINI_API_KEY={Cove Key} | 必须是Gemini原生入站协议，不指向/v1/chat/completions；API Key auth才适用此base变量。恢复selectedType/model及本次进程环境，保留OAuth token。无需修改.env |
-| Continue 1.3.40 | 用户`~/.continue/config.yaml`，schema:v1，models列表新增name=Cove、provider:openai、model、apiBase=`origin/v1`、apiKey为客户端支持的secret引用；roles按已验能力选择chat/edit/apply | secret引用使用`${{ secrets.COVE_API_KEY }}`语法；secret来源由用户在Continue官方流程配置。Continue IDE按官方文档从项目.env、项目.continue/.env、用户~/.continue/.env依次解析secret；CLI还可用进程环境。本轮不创建或修改这些文件；后续实施必须在预览中让用户明确选择并授权对应secret落点。secret未提供时apply配置可完成但连接状态为needs_secret。不将chat成功标作autocomplete/embed/rerank支持 |
+| Gemini CLI 0.62.0实现；nightly仅为旧设计快照 | 项目`.gemini/settings.json`或用户`~/.gemini/settings.json`；security.auth.selectedType=gemini-api-key，model.name={public-id}；启动环境GOOGLE_GEMINI_BASE_URL=`origin`、GOOGLE_GENAI_API_VERSION=v1beta、GEMINI_API_KEY={Cove Key} | 必须是Gemini原生入站协议，不指向/v1/chat/completions；API Key auth才适用此base变量。恢复selectedType/model及本次进程环境，保留OAuth token。无需修改.env |
+| Continue 1.3.40 | 用户`~/.continue/config.yaml`，schema:v1，models列表新增name=Cove、provider:openai、model、apiBase=`origin/v1`、apiKey为客户端支持的secret引用；roles按已验能力选择chat/edit/apply | secret引用使用`${{ secrets.COVE_API_KEY }}`语法；secret来源由用户在Continue官方流程配置。Continue 1.3.40 的官方扩展实际按用户 `~/.continue/.env`、项目 `.continue/.env`、项目 `.env` 的优先级解析 secret；CLI 还可用进程环境。Cove 配置接口不读写这些文件。此次经用户明确批准，仅在隔离验收目录创建临时 `.env`，验收后撤销 Key 并删除目录；日常 secret 落点仍须由用户明确选择并授权。secret未提供时apply配置可完成但连接状态为needs_secret。不将chat成功标作autocomplete/embed/rerank支持 |
 
 JSON对象按key编辑，Continue models按唯一name定位；同名两项先报冲突，不能取第一项覆盖。没有Cove条目时新增，恢复只移除本次新增且未被用户修改的条目；不删除其他models。新增文件恢复时current内容未变才删；若有新增字段，按字段删除Cove部分并保留文件。
 
 依据：[OpenCode配置与变量](https://opencode.ai/docs/config/)、[OpenCode provider实现](https://github.com/sst/opencode/blob/7945de208964a49300d7f770d1a71d078db9a4c4/packages/opencode/src/provider/provider.ts)、[Gemini base URL](https://geminicli.com/docs/reference/configuration/)、[Gemini请求构造](https://github.com/google-gemini/gemini-cli/blob/d75234cae935d58f896f4dbf305e0c51602fa385/packages/core/src/core/contentGenerator.ts)、[Continue秘密解析](https://docs.continue.dev/faqs#managing-local-secrets-and-environment-variables)、[Continue模型schema](https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/models.ts)。
+
+2026-10-05，Gemini CLI 0.62.0已增加版本检测、所选settings.json字段预览/应用/三方恢复；实际CLI读取生成配置并向Cove的Gemini入口发请求。转到Codex订阅时，其topK/thinkingConfig不在转换合同中，返回422且零上游派发，不能记作推理验收通过。原生Gemini来源的真实验收还需用户提供该来源的凭据；Google OAuth文件保持原样。
+
+Continue 1.3.40 增加 VS Code 官方扩展清单检测、所选用户 config.yaml 的 Cove 模型字段预览/应用/CAS 与三方恢复；保留其他模型、注释和未知字段，仅配置 chat 角色。选择订阅来源 Key 后，生成 `useResponsesApi: false`，并将 `requestOptions.extraBodyProperties` 中的 `temperature`、`top_p`、`max_tokens`、`max_completion_tokens` 明确设为 YAML null，采用上游默认采样且不请求输出硬上限；预览披露这些选择，其他 requestOptions 保留。未选择 Key 时不猜测来源能力。恢复按字段保留原值与后续修改，删除本次新增且已空的嵌套映射；无法安全编辑的 anchors、重复 name 或 uses 返回 422，原文件保留。配置接口只写官方 secret 引用，未交付 secret 时仍为 needs_secret。
+
+官方解析器和隔离文件证据仍见 `test-results/completion-20261005-closeout/continue-config.json`。新增 `test-results/completion-20261005-features/continue-ide.json` 证明未修改的官方 Continue 1.3.40 在真实 VS Code 1.140.0 扩展宿主激活、读取生产生成配置、解析经批准的临时 secret，并通过本人 Cove 自有 ChatGPT 来源完成两轮对话与完整用量记录。验收通过扩展随包提供的测试 API 调用真实 core 流程，覆盖宿主集成，未覆盖 GUI 输入、agent/tool、autocomplete、embedding 或 rerank；临时 Key 撤销后的 401 和目录删除结果单独记录。
+
+Cline CLI 3.0.68 与 Cline VS Code 是两个独立客户端。CLI 自动配置使用用户选定的独立 `CLINE_DATA_DIR/settings/providers.json`，只接受官方 `version: 1` 对象格式。写入 `lastUsedProvider=openai-compatible`、对应 provider 的 `settings.provider`、`settings.model`、`settings.baseUrl=origin/v1`；缺失时补齐官方 `updatedAt` 和 `tokenSource=manual` 并纳入本次字段恢复范围。已有其他 provider 和凭据保留。该 provider 如已有持久 apiKey/auth，预览阻止应用，因为它会优先于 SDK 环境变量；不覆盖旧凭据。仅向实际 CLI 进程提供 `OPENAI_API_KEY`，以 `--data-dir` 指向所选目录，不写 Key 到 providers.json、全局 shell 或 .env。
+
+CLI 版本调用设 8 秒时限；应用前再次确认实际版本和环境，超时/失败或变化仍拒绝。CLI 复用现有 CAS、私有字段记录及三方恢复；CLI 自行改写的时间字段会显示冲突，用户选择还原或保留。SDK 在原 provider 上补写的未知元数据按后续修改保留，不能为字节相同而删除。`test-results/completion-20261005-features/cline-cli.json` 记录官方 `@cline/core 0.0.90` 对生产配置的实际 schema/读取、未修改 CLI 的真实 printf 工具及后续准确回答、两条完成请求/用量，以及原 provider/model/login、后改字段保留和新增 Cove provider 清理。该 CLI 使用 Chat 兼容路径；不把原生 Responses 的未经验证字段转换吞掉，也不证明 VS Code 扩展已接入。
 
 ### 5.4 Cline、Roo和Cursor的界面配置合同
 
@@ -235,12 +258,19 @@ Cursor 3.20.21：本轮只证明已安装该版；旧API Keys文档URL现在重�
 | R028 | Codex上下文字段、缺失字段处理、不以quota推模型 | 各订阅权威max output/目录字段，未知不填默认 |
 | R066 | 窗口单位、stale、提醒去重和恢复 | 与R019相同的外部数据源 |
 | R074 | 8客户端版本证据、路径、检测、scope与secret分离 | Cursor模型配置schema；扩展官方可写入口 |
-| R075 | 文件apply与官方UI配置分开、CAS和partial恢复样例 | Cline/Roo/Cursor自动配置成功合同，不能以manual替代自动目标 |
+| R075 | 文件apply与官方UI配置分开、CAS和partial恢复样例 | Cline VS Code/Roo/Cursor 自动配置成功合同；Cline CLI 的独立文件与实际工具证据不替代扩展目标 |
 | R079 | 各客户端协议、字段、secret入口与工具验收 | Cursor本机网关路径与以上自动配置边界 |
 | R096 | 0.158.0 streamed compaction trigger/item/终态；API compact与订阅WS差异 | 设计已定义；实际资格、opaque续接与WS能力属于E09，未执行 |
 | R097 | server tools/缓存/资源归属与拒绝条件 | 各订阅具体tool/cache/资源wire、计价字段 |
 | R098 | 8客户端MCP与Skills落点、逐文件恢复；Continue加载器和readSkill调用链已定位 | 设计已定义；实际客户端激活、MCP连接与恢复属于E07验收，未执行 |
 
-D01解除需要供应商支持的Cove独立client metadata和身份资格证据；D02解除需要上述成功wire样例；D03解除需要官方可写入口/支持格式或用户明确接受的范围调整。新credential不在本轮索取或落盘，也不以真实付费调用试探接口。
+D01解除需要供应商支持的Cove独立client metadata和身份资格证据；D02解除需要上述成功wire样例；D03解除需要官方可写入口/支持格式或用户明确接受的范围调整。凭据只用于用户已经授权的来源和临时验收，不以试探私有接口解除合同缺项。
 
 下一位实现者可直接实现已定义的本地操作与已证实文件格式；必须在每个受阻adapter前保留上述状态和失败行为。不得把全文写完、fixture解析通过、来源URL有效解释成所有适配已就绪。
+
+
+### 2026-10-05 Roo 启动导入合同复核
+
+固定3.53.0源码确有官方 `autoImportSettingsPath` 启动入口，调用 `importSettingsFromPath`；不能继续把 Roo 描述为完全没有外部文件入口。该入口导入 `providerProfiles`，合并已存在的 `apiConfigs`，并设置当前配置。因此移除导入文件中的 Cove profile 不会删除宿主已经导入的 profile/凭据；单纯恢复外部JSON不能证明原生 SecretStorage 已恢复。当前产品仍需原生宿主导入、秘密交付与删除/恢复全链路才能关闭R074/R075的Roo部分，不猜测环境变量引用或直接改state数据库。
+
+官方依据：[启动入口](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/utils/autoImportSettings.ts)、[导入与合并](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/importExport.ts)。源码读取证据保存于 `test-results/completion-20261005-full/roo-contract/`，未据此声称实际宿主验收通过。

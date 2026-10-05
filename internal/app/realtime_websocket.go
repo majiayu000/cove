@@ -108,7 +108,7 @@ func wsCapability(src Source, cap WebSocketModelCapabilities, realtime bool) err
 				return wsError(422, "websocket_adapter", "公开 Responses WS 卡与来源身份/协议不符")
 			}
 		case wsCodexCard:
-			if src.Kind != "codex_subscription" || src.Provider != "codex" || src.NativeProtocol != "responses" || cap.WebSocketWarmup {
+			if src.Kind != "codex_subscription" || src.Provider != "codex" || src.NativeProtocol != "responses" || cap.WebSocketWarmup || chatGPTDirectSource(src) {
 				return wsError(422, "websocket_adapter", "Codex 0.158.0 WS 卡与来源身份/协议不符")
 			}
 		default:

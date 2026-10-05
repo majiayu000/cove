@@ -66,6 +66,7 @@ func (a *App) auditAPI(w http.ResponseWriter, r *http.Request) {
 		EntityID   string    `json:"entity_id,omitempty"`
 		State      string    `json:"state"`
 		HTTPStatus int       `json:"http_status"`
+		ActorID    string    `json:"actor_id,omitempty"`
 	}
 	items := []entry{}
 	for rows.Next() {
@@ -80,7 +81,7 @@ func (a *App) auditAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		method, path, _ := strings.Cut(saved.Result.Path, " ")
 		path, _, _ = strings.Cut(path, "?")
-		items = append(items, entry{saved.ID, saved.CreatedAt, saved.UpdatedAt, method, path, saved.Result.EntityID, saved.State, saved.Result.Status})
+		items = append(items, entry{saved.ID, saved.CreatedAt, saved.UpdatedAt, method, path, saved.Result.EntityID, saved.State, saved.Result.Status, saved.Result.ActorID})
 	}
 	if rows.Err() != nil {
 		fail(w, 503, storageError().Error(), "")
@@ -97,6 +98,7 @@ func (a *App) auditAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 type actionResult struct {
+	ActorID   string          `json:"actor_id,omitempty"`
 	Path      string          `json:"path"`
 	Hash      string          `json:"body_hash,omitempty"`
 	Sensitive bool            `json:"sensitive"`
@@ -147,6 +149,7 @@ func (a *App) withAdminAction(w http.ResponseWriter, r *http.Request, next http.
 		return
 	}
 	result := actionResult{Path: r.Method + " " + r.URL.RequestURI()}
+	result.ActorID, _ = r.Context().Value(enterpriseActorKey{}).(string)
 	// Client configuration can contain arbitrary third-party secret fields.
 	result.Sensitive = strings.HasPrefix(r.URL.Path, "/admin/notifications") || strings.HasPrefix(r.URL.Path, "/admin/clients/") || strings.HasPrefix(r.URL.Path, "/admin/config-extensions/") || strings.HasSuffix(r.URL.Path, "/credential") || strings.HasSuffix(r.URL.Path, "/login") || strings.HasSuffix(r.URL.Path, "/rotate") || (r.URL.Path == "/admin/client-keys" && r.Method == "POST") || strings.Contains(r.Header.Get("Content-Type"), "application/x-tar") || r.URL.Path == "/admin/config-transfer/import-preview" || r.URL.Path == "/admin/telemetry"
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") || r.ContentLength == 0 {

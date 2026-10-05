@@ -12,10 +12,10 @@
   "allow_paid_fallback": true,
   "subscription_quota_threshold": 5,
   "codex": {
-    "base_url": "https://chatgpt.com/backend-api/codex",
+    "base_url": "https://api.openai.com/v1",
     "auth_base_url": "https://auth.openai.com",
-    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "client_id": "dynamic_agent_client",
     "client_version": "0.158.0",
-    "redirect_uri": "http://localhost:1455/auth/callback"
+    "redirect_uri": "http://127.0.0.1:1455/auth/callback"
   }
 }

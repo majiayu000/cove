@@ -8,8 +8,10 @@ type API = <T = any>(
   path: string,
   method?: string,
   body?: unknown,
+  options?: {signal?: AbortSignal},
 ) => Promise<T>;
 type Props = {
+	enterprise?: boolean;
   api: API;
   page: string;
   sources: any[];
@@ -260,29 +262,30 @@ export function V13Console(p: Props) {
   }, [p.onCloseDetail]);
   useEffect(() => {
     const revision = ++loadRevision.current;
+    const controller = new AbortController();
     const paths = ["models", "clients", "budgets"];
-    void Promise.allSettled(paths.map((path) => p.api(path))).then(
-      (results) => {
+    const setters = [setModels, setClients, setBudgets];
+    paths.forEach((path, i) => {
+      void (path === "clients" && p.enterprise ? Promise.resolve({items:[]}) : p.api(path, "GET", undefined, {signal: controller.signal})).then((result) => {
         if (revision !== loadRevision.current) return;
-        const setters = [setModels, setClients, setBudgets];
-        results.forEach((r, i) => {
-          if (r.status === "fulfilled") setters[i](r.value.items);
-          else {
-            if (paths[i] === "clients") setClients(old => old.map(c => ({...c, configuration: {...c.configuration, state: "unavailable", reason: r.reason.message}})));
-            p.onError(`${paths[i]}：${r.reason.message}`);
-          }
-        });
-      },
-    );
+        setters[i](result.items);
+      }).catch((error) => {
+        if (revision !== loadRevision.current) return;
+        if (path === "clients") setClients(old => old.map(c => ({...c, configuration: {...c.configuration, state: "unavailable", reason: error.message}})));
+        p.onError(`${path}：${error.message}`);
+      });
+    });
     const now = new Date(),
       start = new Date(now);
     start.setHours(0, 0, 0, 0);
     void Promise.allSettled([
       p.api(
         `usage?from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(now.toISOString())}`,
+        "GET", undefined, {signal: controller.signal},
       ),
       p.api(
         `usage?from=${encodeURIComponent(new Date(now.getTime() - 3600000).toISOString())}&to=${encodeURIComponent(now.toISOString())}`,
+        "GET", undefined, {signal: controller.signal},
       ),
     ]).then((results) => {
       if (revision !== loadRevision.current) return;
@@ -293,6 +296,7 @@ export function V13Console(p: Props) {
     });
     return () => {
       loadRevision.current++;
+      controller.abort();
     };
   }, [p.usage]);
   useEffect(() => {
@@ -435,7 +439,7 @@ export function V13Console(p: Props) {
       await p.onRefresh();
     }, id);
   }
-  const manage = (page = p.page, id?: string) => p.onManage(page, id);
+  const manage = (page = p.page, id?: string) => {if(p.enterprise&&["工具","运维","设置"].includes(page)){p.onError("企业租户在服务器管理来源、Key、路由和预算；主机文件与运维设置由服务器管理员操作。");return}p.onManage(page,id)};
   const go = (page: string) => {
     setPalette(false);
     setPicker(null);
@@ -450,7 +454,7 @@ export function V13Console(p: Props) {
   }, [copied]);
   const copyBase = () =>
     p.run(async () => {
-      await navigator.clipboard.writeText(`http://${p.status.listen}/v1`);
+      await navigator.clipboard.writeText(`${p.status.api_base_url || "http://"+p.status.listen}/v1`);
       setCopied(true);
     });
   const viewSources = p.sources.map((s) => {
@@ -627,7 +631,7 @@ export function V13Console(p: Props) {
     }));
   const caps = [
     ["text_fields", "text_json"],
-    ["stream", "stream"],
+    ["stream", "text_sse"],
     ["build", "tools"],
     ["call_split", "parallel_tools"],
     ["image", "vision"],
@@ -781,7 +785,7 @@ export function V13Console(p: Props) {
       ["工具", "Clients"],
       ["预算", "Budgets"],
       ["运维", "Operations"],
-    ].map(([zh, en]) => ({
+    ].filter(([zh])=>!p.enterprise||zh==="预算").map(([zh, en]) => ({
       icon: "settings",
       zh,
       en,
@@ -832,7 +836,7 @@ export function V13Console(p: Props) {
     langLabel: lang === "zh" ? "EN" : "中",
     toggleLang: () => setLang((l) => (l === "zh" ? "en" : "zh")),
     listen: p.status.listen || "—",
-    baseURL: `http://${p.status.listen}/v1`,
+    baseURL: `${p.status.api_base_url || "http://"+p.status.listen}/v1`,
     liveLabel: `${p.status.listen?.split(":").pop() || "—"} · ${p.status.runtime_stale ? "—" : p.status.active_requests ?? "—"} live`,
     activeRequests: p.status.runtime_stale ? "—" : p.status.active_requests ?? "—",
     maxConcurrent: p.settings.limits?.max_concurrent ?? "—",
