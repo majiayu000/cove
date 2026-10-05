@@ -12,6 +12,7 @@ check:
 	go vet ./...
 	npm --prefix web run typecheck
 	npm --prefix web run test:v13
+	npm --prefix scripts/roo-vscode test
 dev: build
 	./bin/gatt -config config.example.json serve
 package: build

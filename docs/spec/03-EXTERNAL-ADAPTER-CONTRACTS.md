@@ -206,7 +206,7 @@ CLI 版本调用设 8 秒时限；应用前再次确认实际版本和环境，�
 
 Cline 4.1.21：在设置选择OpenAI Compatible，输入Base URL=`origin/v1`、Cove Key、public Model ID。配置需明确作用于Plan还是Act或两者。固定源码的非秘密字段包括openAiBaseUrl、planModeOpenAiModelId/actModeOpenAiModelId和两个模式的ApiProvider；openAiApiKey属于secret key集合。Cove不得直接写VS Code state.vscdb或模拟SecretStorage文件。若扩展没有稳定官方外部写接口，apply返回422 manual_action_required，并返回可复制的非秘密字段和用户自己完成输入的步骤；不报告applied。恢复由用户在同一模式选择原provider/model，清除这次Cove Key；Cove只保留原非秘密值，不导出原凭据。
 
-Roo 3.53.0：建立独立名称Cove的API profile，选择OpenAI Compatible，Base URL=`origin/v1`、Key、model；按实测填写context/max output，不虚构。ProviderSettingsManager通过VS Code SecretStorage保存api_config profile集合，Cove不直接覆写。先记录原选中profile，恢复时切回原profile；若用户之后修改Cove profile则提示冲突，不替用户删profile。工具能力需native tool calling测试。外部自动apply同样保留D03，不能通过写一个无效JSON假闭环。
+Roo 3.53.0：新增独立 VS Code 适配器 `scripts/roo-vscode`，通过固定版本官方 `createProfile/getProfileEntry/getActiveProfile/setActiveProfile/deleteProfile` API 创建并选中 Cove profile，设置 OpenAI Compatible、Base URL、Key 和 model；不补猜测的 context/max output/价格。凭据由 Roo 官方存储，Cove 不直接访问 SecretStorage 或状态数据库。已有同名 profile 或未恢复记录时拒绝覆盖；记录原选中项和所建 ID，恢复保留用户后来选择。profile 被重新创建或原项删除时拒绝恢复；删除失败保留记录以供重试。由于 `getConfiguration` 过滤 secret，不能比较用户后来修改的 Key，删除前始终由原生提示确认。隔离宿主已验证创建、选择和生产恢复函数；验收的删除确认由预先批准的测试 fixture 提供，GUI 按钮仍未验。网页文件 autoapply 仍返回 422，此原生入口不冒充文件三方合并；真实工具范围见当前实施台账。
 
 Cursor 3.20.21：本轮只证明已安装该版；旧API Keys文档URL现在重定向到文档首页，没有得到该版本稳定的BYOK文件写schema或Cove loopback请求路径证明。模型配置的自动apply返回422并显示“该版本模型配置自动写入尚未验证”；不能写猜测字段，也不能创建公网隧道绕开本机网关边界。MCP/Skills的公开文件入口可独立设计，不由此宣传模型/agent接入已支持。D03解除需要该版官方模型配置API/导入格式，或用户认可只保留手动接入的范围调整。
 
@@ -258,7 +258,7 @@ Cursor 3.20.21：本轮只证明已安装该版；旧API Keys文档URL现在重�
 | R028 | Codex上下文字段、缺失字段处理、不以quota推模型 | 各订阅权威max output/目录字段，未知不填默认 |
 | R066 | 窗口单位、stale、提醒去重和恢复 | 与R019相同的外部数据源 |
 | R074 | 8客户端版本证据、路径、检测、scope与secret分离 | Cursor模型配置schema；扩展官方可写入口 |
-| R075 | 文件apply与官方UI配置分开、CAS和partial恢复样例 | Cline VS Code/Roo/Cursor 自动配置成功合同；Cline CLI 的独立文件与实际工具证据不替代扩展目标 |
+| R075 | 文件apply与官方UI配置分开、CAS和partial恢复样例；Roo 官方 profile API 独立入口 | Cline VS Code/Cursor 自动配置成功合同；Roo GUI 删除确认及用户后改 Key 无法自动比较；Cline CLI 证据不替代扩展目标 |
 | R079 | 各客户端协议、字段、secret入口与工具验收 | Cursor本机网关路径与以上自动配置边界 |
 | R096 | 0.158.0 streamed compaction trigger/item/终态；API compact与订阅WS差异 | 设计已定义；实际资格、opaque续接与WS能力属于E09，未执行 |
 | R097 | server tools/缓存/资源归属与拒绝条件 | 各订阅具体tool/cache/资源wire、计价字段 |
@@ -274,3 +274,7 @@ D01解除需要供应商支持的Cove独立client metadata和身份资格证据�
 固定3.53.0源码确有官方 `autoImportSettingsPath` 启动入口，调用 `importSettingsFromPath`；不能继续把 Roo 描述为完全没有外部文件入口。该入口导入 `providerProfiles`，合并已存在的 `apiConfigs`，并设置当前配置。因此移除导入文件中的 Cove profile 不会删除宿主已经导入的 profile/凭据；单纯恢复外部JSON不能证明原生 SecretStorage 已恢复。当前产品仍需原生宿主导入、秘密交付与删除/恢复全链路才能关闭R074/R075的Roo部分，不猜测环境变量引用或直接改state数据库。
 
 官方依据：[启动入口](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/utils/autoImportSettings.ts)、[导入与合并](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/importExport.ts)。源码读取证据保存于 `test-results/completion-20261005-full/roo-contract/`，未据此声称实际宿主验收通过。
+
+### 2026-10-06 Roo 原生 profile API 入口
+
+固定 3.53.0 的 [公开 API](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/exports/api.ts) 支持原生 profile 的创建、选择和删除，因此采用独立 VSIX，避免启动导入的合并残留。该源码实际 SHA-256 为 `a9ba811c0758214f7e1e8db04dfee8a325e519186ced46cd06f64042a7df8785`。隔离 VS Code 1.140.0 安装的官方 Roo 3.53.0 主 bundle SHA-256 为 `3e8b123dc48eea38f540f1eacfba3d33b0532f1fd64f27b25b3fe440cdb1cbf9`；`test-results/followup-20261006/roo-host-preflight.json` 的六项宿主检查通过。原生创建用实际命令，删除用同一生产恢复函数和已批准的可清理 fixture，未操作日常 IDE 或把 GUI 确认算作已验。
