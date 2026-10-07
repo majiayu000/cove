@@ -21,6 +21,8 @@ make build
 
 首次接入可按 [从来源到首个请求](docs/first-request.md) 操作；端口、准入和账务问题也在该指南中定位。
 
+与 Rekey、litellm-rs 的职责及可复用故障时序见[产品边界与协议回归](docs/protocol-regressions.md)，各项目保留自己的授权、账务和错误合同。
+
 ## 调用与配置
 
 在来源页先创建或复用账号，再保存来源、模型和认证材料；账号凭据通过专用接口存入私有文件。随后创建绑定来源或路由的客户端 API Key，按接入向导配置客户端。调用入口包含 Responses、Chat Completions、Messages 与 Gemini REST；原生媒体、Files、后台任务、Compact、WebSocket 和 Realtime 按来源及模型能力卡分别开启。请求权限、并发、费用和未知状态共用本地执行与账务边界。
