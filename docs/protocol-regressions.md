@@ -6,13 +6,13 @@ Cove 已有的[单服务器企业模式](enterprise.md)保留独立配置、目�
 
 ## 从已有用例复用
 
-下面均来自现有原生测试。上游数据和凭据为合成夹具；部分用例使用实际 HTTP/TLS，部分直接注入 transport/流状态。它们不是实际提供方、真实账号、设备权限或外部维护者采用证据。Cove 基线为 `0d13264d96529770ab6c54be765c4587ef85e1a6`。
+下面均来自现有原生测试。上游数据和凭据为合成夹具；部分用例使用实际 HTTP，部分直接注入 transport/流状态。它们不是实际提供方、真实账号、设备权限或外部维护者采用证据。Cove 基线为 `0d13264d96529770ab6c54be765c4587ef85e1a6`。
 
 | 故障时序/输入 | Cove 的检查点 | 现有用例 |
 | --- | --- | --- |
 | 上游发送 `response.output_text.delta` 后 EOF，没有完整终态 | 请求记录为 failed；派发一次；转换到 Chat/Messages 时不补 `[DONE]` 或 `message_stop` | [app_test.go](../internal/app/app_test.go)：`TestDisconnectNotSuccessAndNoRetry`；[compat_test.go](../internal/app/compat_test.go)：`TestCompatErrorsNoRetryAndNoSuccessfulTerminator` |
-| 文本 A、同名工具 lookup(q=a)、lookup(q=b)、文本 B/C 交错，工具结果随后返回 | 工具身份不串线，输出顺序不变，内容和参数不重复；usage 按本协议维度转换 | [gemini_conversion_test.go](../internal/app/gemini_conversion_test.go)：`TestSpecGeminiConversionStreamsInterleavingAndUsage`；[compat_test.go](../internal/app/compat_test.go)：`TestCompatFragmentedStreamsAndToolArguments`、`TestCompatToolResultRoundTrip` |
-| POST 可能已经到达，读取响应失败；对照组是明确发送前拨号失败 | 未知提交只尝试一次；可证未发送才按路由上限重选；一个逻辑请求及一份预留，各次尝试单独保留 | [admission_acceptance_test.go](../internal/app/admission_acceptance_test.go)：`TestAcceptanceBoundedAttemptsNoUnknownReplay`（`unknown_submission` 与 `three_safe_attempts`）；[contract_test.go](../internal/app/contract_test.go)：`TestContractPostBodiesNotReplayable` |
+| 文本 A、同名工具 lookup(q=a)、lookup(q=b)、文本 B/C 交错，工具结果随后返回 | 并行工具 ID 不同，文本/工具输出顺序和次数保持；usage 按本协议维度转换 | [gemini_conversion_test.go](../internal/app/gemini_conversion_test.go)：`TestSpecGeminiConversionStreamsInterleavingAndUsage`；[compat_test.go](../internal/app/compat_test.go)：`TestCompatFragmentedStreamsAndToolArguments`、`TestCompatToolResultRoundTrip` |
+| POST 可能已经到达，读取响应失败；对照组是明确发送前拨号失败 | 未知提交只尝试一次；可证未发送才按路由上限进行有限重试；一个逻辑请求及一份预留，各次尝试单独保留 | [admission_acceptance_test.go](../internal/app/admission_acceptance_test.go)：`TestAcceptanceBoundedAttemptsNoUnknownReplay`（`unknown_submission` 与 `three_safe_attempts`）；[contract_test.go](../internal/app/contract_test.go)：`TestContractPostBodiesNotReplayable` |
 | 流开始后客户端断开，或写入被背压阻塞时请求取消 | 上游 context 结束、记录 cancelled；禁用来源只禁止新准入，不主动取消已有请求 | [app_test.go](../internal/app/app_test.go)：`TestCancellationDisableRevokeAndDelete`；[contract_test.go](../internal/app/contract_test.go)：`TestContractCancellationWakesBlockedWriter` |
 | 已预留请求尚在执行时预算降低；中断后费用不完整，再重启和人工对账 | 原请求仍能结算；新准入服从降低后的限额；未知费用保留 pending，不能用伪造零费用释放；对账保留原观察与审计，重复对账返回 409 | [accounting_test.go](../internal/app/accounting_test.go)：`TestSpecAccountingBudgetUpdateDoesNotBreakInFlightSettlement`、`TestSpecAccountingUnknownAndManualReconciliation`、`TestSpecAccountingRestartPreservesUnknownReservation` |
 
