@@ -687,7 +687,11 @@ try {
   await guiRouteRow.getByText("编辑路由", { exact: true }).click();
   await guiRouteRow.locator(`input[name=members][value="${guiModel.id}"]`).check();
   await guiRouteRow.locator(`input[name="priority_${guiModel.id}"]`).fill("2");
-  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  // Establish the focus to restore; mouse-click focus varies by platform.
+  const routeSave = guiRouteRow.getByRole("button", { name: "保存路由", exact: true });
+  await routeSave.focus();
+  await expect(routeSave).toBeFocused();
+  await routeSave.press("Enter");
   await expect.poll(async () => (await api(`routes/${guiRoute.id}`)).members.length).toBe(1);
   await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeFocused();
   await guiRouteRow.getByLabel("等待容量", { exact: true }).fill("2");
