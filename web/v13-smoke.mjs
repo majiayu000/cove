@@ -687,9 +687,35 @@ try {
   await guiRouteRow.getByText("编辑路由", { exact: true }).click();
   await guiRouteRow.locator(`input[name=members][value="${guiModel.id}"]`).check();
   await guiRouteRow.locator(`input[name="priority_${guiModel.id}"]`).fill("2");
-  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  // Establish the focus to restore; mouse-click focus varies by platform.
+  const routeSave = guiRouteRow.getByRole("button", { name: "保存路由", exact: true });
+  await routeSave.focus();
+  await expect(routeSave).toBeFocused();
+  await routeSave.press("Enter");
   await expect.poll(async () => (await api(`routes/${guiRoute.id}`)).members.length).toBe(1);
   await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeFocused();
+  // A save may replace its form, but must not steal focus moved during the request.
+  let releaseRouteSave;
+  const routeSaveGate = new Promise(resolve => { releaseRouteSave = resolve; });
+  const delayRouteSave = async route => {
+    if (route.request().method() === "PATCH") await routeSaveGate;
+    await route.continue();
+  };
+  await page.route(`**/admin/routes/${guiRoute.id}`, delayRouteSave);
+  try {
+    await guiRouteRow.getByLabel("等待容量", { exact: true }).fill("1");
+    await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+    await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeDisabled();
+    const closeRoutes = routesGUI.getByRole("button", { name: "关闭管理", exact: true });
+    await closeRoutes.focus();
+    releaseRouteSave();
+    await expect(guiRouteRow.locator("form")).toHaveAttribute("data-dirty", "false");
+    await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeEnabled();
+    await expect(closeRoutes).toBeFocused();
+  } finally {
+    releaseRouteSave();
+    await page.unroute(`**/admin/routes/${guiRoute.id}`, delayRouteSave);
+  }
   await guiRouteRow.getByLabel("等待容量", { exact: true }).fill("2");
   const currentRoute = await api(`routes/${guiRoute.id}`);
   await api(`routes/${guiRoute.id}`, "PATCH", { version: currentRoute.version, queue_limit: 1 });
@@ -697,8 +723,11 @@ try {
   await expect(guiRouteRow.getByRole("region", { name: "路由设置版本冲突", exact: true })).toBeVisible();
   await expect(guiRouteRow.getByLabel("等待容量", { exact: true })).toHaveValue("2");
   await guiRouteRow.getByRole("button", { name: "使用当前版本，保留路由输入", exact: true }).click();
-  await guiRouteRow.getByRole("button", { name: "保存路由", exact: true }).click();
+  await routeSave.focus();
+  await expect(routeSave).toBeFocused();
+  await routeSave.press("Enter");
   await expect.poll(async () => (await api(`routes/${guiRoute.id}`)).queue_limit).toBe(2);
+  await expect(guiRouteRow.getByRole("button", { name: "保存路由", exact: true })).toBeFocused();
   await guiRouteRow.getByRole("button", { name: "预览选择", exact: true }).click();
   await expect(routesGUI.getByText("选择 v13-gui-model", { exact: true })).toBeVisible();
   const aliasRow = routesGUI.locator(".tool-row").filter({ has: page.locator("code").getByText("gui-public-model", { exact: true }) });

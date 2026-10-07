@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RoutingPolicyFields, RoutingStrategyOptions, routingPolicyInput, RoutingPolicyEvidence } from "./RoutingPolicyFields";
 
 type API = <T = any>(path: string, method?: string, body?: unknown) => Promise<T>;
@@ -10,6 +10,15 @@ export function ConsoleModules({ api, sources, clientKeys, page, selectedId, onC
   const [edits,setEdits]=useState<Record<string,{version:number;formVersion:number;base:any;readError?:string}>>({});
   const [loading,setLoading]=useState(true);
   const revision=useRef(0),mounted=useRef(true),running=useRef(new Set<string>());
+  const focusRequests=useRef<Array<{trigger:HTMLElement|null;focusID?:string}>>([]);
+  // Restore only after React commits the enabled replacement of a keyed form.
+  useLayoutEffect(() => {
+    const requests=focusRequests.current;focusRequests.current=[];
+    for(const {trigger,focusID} of requests){
+      if(document.activeElement!==document.body&&document.activeElement!==trigger)continue;
+      (trigger?.isConnected?trigger:focusID?document.getElementById(focusID):null)?.focus();
+    }
+  }, [pending]);
   async function load() {
     const generation=++revision.current;setLoading(true);setError("");
     const results = await Promise.allSettled([api("models"), api("routes"), api("model-aliases")]);
@@ -21,7 +30,7 @@ export function ConsoleModules({ api, sources, clientKeys, page, selectedId, onC
     if (failures.length) setError(failures.map((v) => v.reason.message).join("；"));
   }
   useEffect(() => { let active = true;mounted.current=true;revision.current++; load().catch((e) => { if (active) setError(e.message); }); return () => { active = false;mounted.current=false;revision.current++; }; }, [page]);
-  async function run(id: string, fn: () => Promise<void>) { if(running.current.has(id))return;const trigger=document.activeElement instanceof HTMLElement?document.activeElement:null,focusID=trigger?.id;running.current.add(id);setPending([...running.current]); setError(""); setNotice(""); try { await fn(); await Promise.all([load(),onChanged()]); } catch (e) { if(mounted.current)setError((e as Error).message); } finally { running.current.delete(id);if(mounted.current){setPending([...running.current]);requestAnimationFrame(()=>{if(document.activeElement===document.body||document.activeElement===trigger)(trigger?.isConnected?trigger:focusID?document.getElementById(focusID):null)?.focus()})} } }
+  async function run(id: string, fn: () => Promise<void>) { if(running.current.has(id))return;const trigger=document.activeElement instanceof HTMLElement?document.activeElement:null,focusID=trigger?.id;running.current.add(id);setPending([...running.current]); setError(""); setNotice(""); try { await fn(); await Promise.all([load(),onChanged()]); } catch (e) { if(mounted.current)setError((e as Error).message); } finally { running.current.delete(id);if(mounted.current){focusRequests.current.push({trigger,focusID});setPending([...running.current])} } }
   async function saveEdit(kind:"models"|"routes",entity:any,patch:unknown,after?:()=>Promise<void>){
     const edit=edits[entity.id]??{version:entity.version,formVersion:entity.version,base:entity};
     let saved=false;
