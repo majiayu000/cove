@@ -1,17 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 
 type API = <T = any>(path: string, method?: string, body?: unknown, options?: {signal?: AbortSignal}) => Promise<T>;
-type ClientCard = { kind: string; name: string; version: string; contract_version: string; status: string; scopes: string[]; recommended_paths: Record<string, string[]>; evidence: string };
+type ClientCard = { kind: string; name: string; version: string; contract_version: string; status: string; scopes: string[]; recommended_paths: Record<string, string[]>; evidence: string; manual_setup?: string; docs_url?: string };
 type FieldDiff = { field: string; before: unknown; after: unknown; action: string };
 type Preview = { preview_id: string; expires_at: string; kind: string; status: string; client_version: string; files: { path: string; exists: boolean; base_hash: string; redacted_diff: FieldDiff[] }[]; blockers: string[]; warnings: string[]; required_secret: { mode: string; env_name: string; instruction: string; codex_home?: string } };
 type Change = { id: string; kind: string; scope: string; path: string; state: string; client_version: string; created_at: string; files: { status: string }[] };
 type RestorePreview = { change_id: string; path: string; current_hash: string; status: string; fields: { field: string; action: string; before: unknown; ours: unknown; current: unknown }[] };
-const statusLabel: Record<string, string> = { installed: "已安装，配置卡已核验", not_installed: "未安装", detection_failed: "版本检测失败", unsupported_version: "此版本配置合同未核验", applying: "应用未完成", applied: "文件已应用", restoring: "恢复未完成", restored: "已恢复", partial: "文件可能已改变，请预览恢复", failed: "写入失败" };
+const statusLabel: Record<string, string> = { installed: "已安装，配置卡已核验", manual_setup: "已安装，需按接入说明配置或核验", not_installed: "未安装", detection_failed: "版本检测失败", unsupported_version: "此版本配置合同未核验", applying: "应用未完成", applied: "文件已应用", restoring: "恢复未完成", restored: "已恢复", partial: "文件可能已改变，请预览恢复", failed: "写入失败" };
 function show(value: unknown) { return value === null || value === undefined ? "未设置" : String(value); }
 
 export function ClientConsole({ api, initialKind, initialModel, clientKeys = [], onChanged }: { api: API; initialKind?: string; initialModel?: string; clientKeys?: {id:string;name:string;revoked:boolean}[]; onChanged?: () => Promise<void> }) {
   const [clients, setClients] = useState<ClientCard[]>([]), [changes, setChanges] = useState<Change[]>([]);
-  const [kind, setKind] = useState(initialKind || "codex"), [scope, setScope] = useState(initialKind && !["codex", "continue", "cline"].includes(initialKind) ? "project" : "user");
+  const [kind, setKind] = useState(initialKind || "codex"), [scope, setScope] = useState(initialKind && !["codex", "continue", "cline", "grok"].includes(initialKind) ? "project" : "user");
   const [root, setRoot] = useState(""), [path, setPath] = useState(""), [model, setModel] = useState(initialModel || ""), [overrides, setOverrides] = useState("");
   const [keyId, setKeyId] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null), [restore, setRestore] = useState<RestorePreview | null>(null), [resolutions, setResolutions] = useState<Record<string, string>>({});
@@ -30,7 +30,7 @@ export function ClientConsole({ api, initialKind, initialModel, clientKeys = [],
     if (!mounted.current || version !== loadRevision.current) return;
     setLoading(false);
     if (results[0].status === "fulfilled") setClients(results[0].value.items);
-    if (results[1].status === "fulfilled") setChanges(results[1].value.items.filter(change => ["codex", "claude", "opencode", "gemini", "continue", "cline"].includes(change.kind)));
+    if (results[1].status === "fulfilled") setChanges(results[1].value.items.filter(change => ["codex", "claude", "opencode", "gemini", "continue", "cline", "grok"].includes(change.kind)));
     const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     setError(errors.map((result) => result.reason instanceof Error ? result.reason.message : "客户端信息读取失败").join("；"));
   }
@@ -88,20 +88,20 @@ export function ClientConsole({ api, initialKind, initialModel, clientKeys = [],
       <div className="section-title"><h2>客户端配置</h2><button disabled={loading || pending.has("detect")} onClick={(event) => void run("detect", async () => { await load(); }, event.currentTarget)}>{loading || pending.has("detect") ? "正在检测…" : "重新检测版本"}</button></div>
       <p>选择实际客户端和配置位置，再预览、应用或恢复。Cove 只修改显示的字段；Key 使用所选客户端支持的引用方式。</p>
       {!loading && !error && !clients.length && <p>尚无检测结果，可重新检测；检测失败会在上方显示原因。</p>}
-      {clients.map((client) => <div className="tool-row" key={client.kind}><div><strong>{client.name}</strong><span>{client.version || "版本未知"} · {statusLabel[client.status] || client.status}</span></div><details><summary>配置卡依据</summary><p>{client.evidence}</p><p>规范基线版本 {client.contract_version}。本机版本另行验证的卡只证明原生配置解析。</p></details></div>)}
-      <form ref={configForm} aria-describedby={error ? "client-config-error" : undefined} onSubmit={(event) => { event.preventDefault(); void run("preview", createPreview); }}>
+      {clients.map((client) => <div className="tool-row" key={client.kind}><div><strong>{client.name}</strong><span>{client.version || "版本未知"} · {statusLabel[client.status] || client.status}</span></div><details><summary>{client.manual_setup ? "接入说明与待验项" : "配置卡依据"}</summary>{client.manual_setup ? <p>{client.manual_setup}</p> : <><p>{client.evidence}</p><p>规范基线版本 {client.contract_version}。配置解析与真实调用分别验收。</p></>}{client.docs_url && <a href={client.docs_url} target="_blank" rel="noreferrer">官方接入文档</a>}</details></div>)}
+      {!selected?.manual_setup && <form ref={configForm} aria-describedby={error ? "client-config-error" : undefined} onSubmit={(event) => { event.preventDefault(); void run("preview", createPreview); }}>
         <div className="inline-form">
           <label>接入 Key（用于核对来源能力）<select {...inputError("key_id")} value={keyId} disabled={configBusy} onChange={event=>{changed();setKeyId(event.target.value)}}><option value="">未选择；仅生成基础配置</option>{clientKeys.filter(key=>!key.revoked).map(key=><option key={key.id} value={key.id}>{key.name}</option>)}</select></label>
-          <label>客户端<select {...inputError("kind")} value={kind} disabled={configBusy} onChange={(event) => { changed(); setKind(event.target.value); setScope(["codex", "continue", "cline"].includes(event.target.value) ? "user" : "project"); setRoot(""); setPath(""); }}>{clients.length ? clients.map((client) => <option value={client.kind} key={client.kind}>{client.name}</option>) : <><option value="codex">Codex CLI</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></>}</select></label>
+          <label>客户端<select {...inputError("kind")} value={kind} disabled={configBusy} onChange={(event) => { changed(); setKind(event.target.value); setScope(["codex", "continue", "cline", "grok"].includes(event.target.value) ? "user" : "project"); setRoot(""); setPath(""); }}>{clients.length ? clients.filter(client => !client.manual_setup).map((client) => <option value={client.kind} key={client.kind}>{client.name}</option>) : <><option value="codex">Codex CLI</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></>}</select></label>
           <label>作用域<select {...inputError("scope")} value={scope} disabled={configBusy} onChange={(event) => { changed(); setScope(event.target.value); setPath(""); }}><option value="user">用户 / 独立配置目录</option>{selected?.scopes.includes("project") !== false && <option value="project">项目</option>}</select></label>
         </div>
-        <label>授权目录（绝对路径）<input {...inputError("authorized_root")} value={root} disabled={configBusy} required placeholder={kind === "cline" ? "选定的独立 CLINE_DATA_DIR 目录" : kind === "codex" && scope === "user" ? "选定的独立 CODEX_HOME 目录" : scope === "user" ? "选定的用户主目录" : "选定的项目根目录"} onChange={(event) => { changed(); setRoot(event.target.value); }} /></label>
+        <label>授权目录（绝对路径）<input {...inputError("authorized_root")} value={root} disabled={configBusy} required placeholder={kind === "grok" ? "选定的独立 GROK_HOME 目录" : kind === "cline" ? "选定的独立 CLINE_DATA_DIR 目录" : kind === "codex" && scope === "user" ? "选定的独立 CODEX_HOME 目录" : scope === "user" ? "选定的用户主目录" : "选定的项目根目录"} onChange={(event) => { changed(); setRoot(event.target.value); }} /></label>
         <label>配置文件（绝对路径）<input {...inputError("explicit_path")} value={path} disabled={configBusy} required placeholder={selected?.recommended_paths[scope]?.join(" 或 ") || "请选择配置文件"} onChange={(event) => { changed(); setPath(event.target.value); }} /></label>
         <label>公开模型 ID<input {...inputError("model")} value={model} disabled={configBusy} required placeholder="例如 coding" onChange={(event) => { changed(); setModel(event.target.value); }} /></label>
         <details><summary>检查明确选定的其他配置</summary><p>如有更高优先级文件，可在这里逐行填写同一授权目录内的配置路径。未选定的管理配置和 CLI 参数须在启动客户端时自行确认。</p><label>额外配置文件（每行一个绝对路径）<textarea {...inputError("override_paths")} value={overrides} disabled={configBusy} rows={3} onChange={(event) => { changed(); setOverrides(event.target.value); }} /></label></details>
         <p>符号链接、目录外路径、未知版本或无法保留的格式会拒绝。已有密钥不会显示在 diff；原字段值私有保存供恢复。</p>
         <button disabled={configBusy}>{pending.has("preview") ? "正在预览…" : "生成字段预览"}</button>
-      </form>
+      </form>}
     </section>
     {preview && <section className="panel" aria-label="客户端配置预览">
       <h2>应用预览</h2><p>{preview.kind} · {preview.client_version} · {preview.status === "blocked" ? "被阻止" : "可应用"} · 预览到期 {new Date(preview.expires_at).toLocaleString()}</p>

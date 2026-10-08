@@ -106,14 +106,14 @@ func extensionMCPInput(t *testing.T, client, transport string) (extensionInput, 
 }
 
 func TestSpecConfigExtensionsMCPMatrix(t *testing.T) {
-	for _, client := range []string{"codex", "claude", "opencode", "gemini", "cline", "roo", "continue", "cursor"} {
+	for _, client := range []string{"codex", "claude", "opencode", "gemini", "cline", "roo", "continue", "cursor", "grok", "qodercli"} {
 		for _, transport := range []string{"stdio", "http"} {
 			t.Run(client+"/"+transport, func(t *testing.T) {
 				f := clientFixture(t)
 				in, _ := extensionMCPInput(t, client, transport)
 				var before string
 				switch client {
-				case "codex":
+				case "codex", "grok":
 					before = "# unrelated comment\nmodel = \"keep-model\"\n[mcp_servers.other]\ncommand = \"user-server\"\n"
 				case "continue":
 					before = "name: Existing config\nversion: 1.0.0\nschema: v1\n# unrelated comment\nmcpServers:\n  - name: other\n    command: user-server\nmodels:\n  - name: User model\n    model: keep-model\n"
@@ -141,7 +141,7 @@ func TestSpecConfigExtensionsMCPMatrix(t *testing.T) {
 					definition["command"] = "must-never-be-executed"
 					definition["args"] = []any{"--synthetic-tool"}
 					switch client {
-					case "claude":
+					case "claude", "qodercli":
 						definition["type"] = "stdio"
 					case "roo":
 						definition["type"] = "stdio"
@@ -157,7 +157,7 @@ func TestSpecConfigExtensionsMCPMatrix(t *testing.T) {
 				} else {
 					definition["url"] = "https://mcp.example.invalid/mcp"
 					switch client {
-					case "claude", "roo":
+					case "claude", "roo", "qodercli":
 						definition["type"] = "http"
 					case "opencode":
 						definition["type"] = "remote"

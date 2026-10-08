@@ -39,22 +39,46 @@ type clientCard struct {
 	RecommendedPaths map[string][]string `json:"recommended_paths"`
 	Evidence         string              `json:"evidence"`
 	Configuration    clientConfiguration `json:"configuration"`
+	Executable       string              `json:"-"`
+	AppBundle        string              `json:"-"`
+	ManualSetup      string              `json:"manual_setup,omitempty"`
+	DocsURL          string              `json:"docs_url,omitempty"`
 }
 
 func clientCards() []clientCard {
 	home, _ := os.UserHomeDir()
-	return []clientCard{
-		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0 production-generated config and isolated two-round tool loop verified"},
+	return append([]clientCard{
+		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0/0.160.1 production-generated config and isolated two-round tool loop verified"},
 		{Kind: "claude", Name: "Claude Code", ContractVersion: "2.1.281", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".claude", "settings.json")}, "project": {"<项目>/.claude/settings.local.json"}}, Evidence: "Cove v1.2 external contracts 5.2; code.claude.com/docs/en/settings and llm-gateway"},
 		{Kind: "opencode", Name: "OpenCode", ContractVersion: "1.18.33", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".config", "opencode", "opencode.json")}, "project": {"<项目>/opencode.json", "<项目>/opencode.jsonc"}}, Evidence: "Cove v1.2; sst/opencode 7945de208964a49300d7f770d1a71d078db9a4c4; 1.18.27 isolated debug config --pure parser accepted"},
 		{Kind: "gemini", Name: "Gemini CLI", ContractVersion: "0.62.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".gemini", "settings.json")}, "project": {"<项目>/.gemini/settings.json"}}, Evidence: "Gemini CLI 0.62.0; geminicli.com/docs/reference/configuration; gemini-api-key auth and GOOGLE_GEMINI_BASE_URL loopback override"},
 		{Kind: "continue", Name: "Continue (VS Code)", ContractVersion: "1.3.40", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".continue", "config.yaml")}}, Evidence: "Continue 1.3.40; docs.continue.dev/reference and local secrets contract; selected config.yaml only, IDE activation requires separate acceptance"},
 		{Kind: "cline", Name: "Cline CLI", ContractVersion: "3.0.68", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CLINE_DATA_DIR>/settings/providers.json"}}, Evidence: "Official cline 3.0.68 and @cline/core 0.0.90; ProviderSettingsManager schema and actual CLI OPENAI_API_KEY/Chat boundary verified; VS Code extension is a separate client"},
-	}
+		{Kind: "grok", Name: "Grok Build", ContractVersion: "1.0.46", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 GROK_HOME>/config.toml"}}, Evidence: "Official Grok Build settings/reference; user-level models.default and model.cove BYOK; env_key credential reference; project model settings are not supported", DocsURL: "https://docs.x.ai/build/settings"},
+	}, manualClientCards()...)
 }
 
 func detectClient(ctx context.Context, card clientCard) clientCard {
+	if card.AppBundle != "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			card.Status = "detection_failed"
+			return card
+		}
+		for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
+			path := filepath.Join(root, card.AppBundle)
+			if info, err := os.Stat(path); err == nil && info.IsDir() {
+				card.Binary, card.Status = path, "manual_setup"
+				return card
+			}
+		}
+		card.Status = "not_installed"
+		return card
+	}
 	name := card.Kind
+	if card.Executable != "" {
+		name = card.Executable
+	}
 	if name == "claude" {
 		name = "claude"
 	}
@@ -87,6 +111,10 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 		return card
 	}
 	card.Version = strings.TrimSpace(out.String())
+	if card.ManualSetup != "" {
+		card.Status = "manual_setup"
+		return card
+	}
 	if card.Kind == "continue" {
 		card.Version = ""
 		for _, line := range strings.Split(out.String(), "\n") {
@@ -102,7 +130,11 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 	}
 	version := strings.TrimPrefix(card.Version, "codex-cli ")
 	version = strings.TrimSuffix(version, " (Claude Code)")
-	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0") || card.Kind == "opencode" && version == "1.18.27"
+	if card.Kind == "grok" {
+		version = strings.TrimPrefix(version, "grok ")
+		version, _, _ = strings.Cut(version, " ")
+	}
+	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0" || version == "0.160.1") || card.Kind == "opencode" && version == "1.18.27"
 	if valid {
 		card.Status = "installed"
 	} else {
@@ -337,6 +369,10 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "该客户端没有已核验的自动配置写入合同", "kind")
 		return
 	}
+	if card.ManualSetup != "" {
+		fail(w, 422, card.ManualSetup, "kind")
+		return
+	}
 	var in clientConfigInput
 	if !decode(w, r, &in) {
 		return
@@ -357,6 +393,8 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subscriptionCompatibility := false
+	grokBackend := "responses"
+	grokKeyBlocker := ""
 	if in.KeyID != "" {
 		var key ClientKey
 		var keyData string
@@ -369,13 +407,19 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 			fail(w, 409, "所选客户端 Key 不存在或已撤销", "key_id")
 			return
 		}
-		if (card.Kind == "claude" || card.Kind == "continue") && key.SourceID != "" {
+		if (card.Kind == "claude" || card.Kind == "continue" || card.Kind == "grok") && key.SourceID != "" {
 			source, err := a.Store.source(key.SourceID)
 			if err != nil {
 				fail(w, 503, "客户端 Key 的来源不可读", "key_id")
 				return
 			}
 			subscriptionCompatibility = source.Kind == "codex_subscription"
+			if card.Kind == "grok" && source.NativeProtocol == "chat_completions" {
+				grokBackend = "chat_completions"
+			}
+		}
+		if card.Kind == "grok" && !allowed(key.ProtocolAllowlist, grokBackend) {
+			grokKeyBlocker = "所选 Key 不允许 Grok 将使用的 " + grokBackend + " 协议，请先核对 Key 权限或选择其他 Key。"
 		}
 	}
 	target, err := openClientTarget(card.Kind, in.Scope, in.Root, in.Path, false)
@@ -390,6 +434,13 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := clientDesiredFields(card.Kind, in.Model, "http://"+a.Config.Listen, subscriptionCompatibility)
+	if card.Kind == "grok" {
+		for i := range fields {
+			if clientFieldName(fields[i].Path) == "model.cove.api_backend" {
+				fields[i].Ours = grokBackend
+			}
+		}
+	}
 	private := clientPrivateChange{Kind: card.Kind, Model: in.Model, Scope: in.Scope, Root: in.Root, Path: in.Path, Version: card.Version, BeforeHash: clientHash(before, existed), Existed: existed}
 	private.SubscriptionCompatibility = subscriptionCompatibility
 	doc, err := parseClientDocument(card.Kind, in.Path, before, existed)
@@ -439,6 +490,12 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 	if card.Kind == "gemini" {
 		preview.RequiredSecret["instruction"] = "仅向 Gemini 进程传入新建 Cove Key 的 GEMINI_API_KEY、GOOGLE_GEMINI_BASE_URL=http://" + a.Config.Listen + " 和 GOOGLE_GENAI_API_VERSION=v1beta；不修改全局 shell、.env 或 Google 登录文件。"
 	}
+	if card.Kind == "grok" {
+		preview.Warnings = append(preview.Warnings, "仅设置默认主模型的 "+grokBackend+" BYOK；辅助模型和管理策略保留，须在 grok inspect 中核对。项目配置不支持模型设置，启动使用所选 GROK_HOME，Cove Key 仅通过 COVE_API_KEY 进程环境传入。")
+		if in.KeyID == "" {
+			preview.Warnings = append(preview.Warnings, "未选择 Key，默认使用 Responses。Chat 来源应先选择其来源 Key 再预览，避免原生 Responses 字段无法转换；路由 Key 的目标协议须另行核对。")
+		}
+	}
 	if card.Kind == "continue" {
 		preview.Warnings = append(preview.Warnings, "仅配置 chat 角色；没有启用 autocomplete、embedding、rerank 或声明工具能力。Continue 的本地 secret 必须通过其官方流程单独提供；Cove 不读取或写入 .env。当前所选配置的扩展加载、连接和工具需单独验收。")
 		if in.KeyID == "" {
@@ -453,6 +510,9 @@ func (a *App) clientsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if card.Status != "installed" {
 		preview.Blockers = append(preview.Blockers, card.Status+"：当前客户端版本没有已核验的配置卡")
+	}
+	if grokKeyBlocker != "" {
+		preview.Blockers = append(preview.Blockers, grokKeyBlocker)
 	}
 	if card.Kind == "codex" && in.Scope == "project" {
 		preview.Warnings = append(preview.Warnings, "Codex 仅在信任项目后读取项目配置；本次没有改变项目信任。")
@@ -524,6 +584,8 @@ func clientDesiredFields(kind, model, origin string, subscriptionCompatibility .
 	switch kind {
 	case "codex":
 		return []clientField{add([]string{"model_provider"}, "cove"), add([]string{"model"}, model), add([]string{"model_providers", "cove", "name"}, "Cove"), add([]string{"model_providers", "cove", "base_url"}, origin+"/v1"), add([]string{"model_providers", "cove", "wire_api"}, "responses"), add([]string{"model_providers", "cove", "env_key"}, "COVE_API_KEY")}
+	case "grok":
+		return []clientField{add([]string{"models", "default"}, "cove"), add([]string{"model", "cove", "model"}, model), add([]string{"model", "cove", "name"}, "Cove"), add([]string{"model", "cove", "base_url"}, origin+"/v1"), add([]string{"model", "cove", "api_backend"}, "responses"), add([]string{"model", "cove", "env_key"}, "COVE_API_KEY")}
 	case "claude":
 		fields := []clientField{add([]string{"model"}, model), add([]string{"env", "ANTHROPIC_BASE_URL"}, origin)}
 		if len(subscriptionCompatibility) > 0 && subscriptionCompatibility[0] {
@@ -564,6 +626,9 @@ func clientSecretDelivery(kind, root string) map[string]any {
 	if kind == "codex" {
 		out["codex_home"] = root
 	}
+	if kind == "grok" {
+		out["instruction"] = "启动 Grok Build 时设置 GROK_HOME 为所选独立目录，并仅向该进程传入 COVE_API_KEY。先运行 grok inspect 核对配置；不修改日常 auth.json、全局 shell 或 .env。"
+	}
 	if kind == "gemini" {
 		out["instruction"] = "仅向启动的 Gemini 进程传入 GEMINI_API_KEY（新建 Cove Key）、GOOGLE_GEMINI_BASE_URL（Cove origin）和 GOOGLE_GENAI_API_VERSION=v1beta；不要修改全局 shell、.env 或 Google 登录文件。"
 	}
@@ -585,6 +650,11 @@ func clientEnvironmentBlockers(kind, root string) []string {
 		if v := os.Getenv("CODEX_HOME"); v != "" && filepath.Clean(v) != filepath.Clean(root) {
 			return []string{"Cove 当前进程 CODEX_HOME 指向其他目录；为客户端选择独立启动环境后重新预览"}
 		}
+	case "grok":
+		if v := os.Getenv("GROK_HOME"); v != "" && filepath.Clean(v) != filepath.Clean(root) {
+			return []string{"Cove 当前进程 GROK_HOME 指向其他目录；为客户端选择独立启动环境后重新预览"}
+		}
+		names = []string{"GROK_DEFAULT_MODEL", "GROK_MODELS_BASE_URL"}
 	case "opencode":
 		names = []string{"OPENCODE_CONFIG", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR"}
 	case "gemini":
@@ -1045,6 +1115,8 @@ func openClientTarget(kind, scope, root, path string, create bool) (*clientTarge
 	switch kind {
 	case "codex":
 		valid = scope == "user" && relative == "config.toml" || scope == "project" && relative == filepath.Join(".codex", "config.toml")
+	case "grok":
+		valid = scope == "user" && relative == "config.toml"
 	case "claude":
 		valid = scope == "user" && relative == filepath.Join(".claude", "settings.json") || scope == "project" && relative == filepath.Join(".claude", "settings.local.json")
 	case "opencode":
@@ -1240,7 +1312,7 @@ func parseClientDocument(kind, path string, b []byte, exists bool) (*clientDocum
 	if kind == "continue" {
 		return parseContinueDocument(d, b, exists)
 	}
-	if kind == "codex" {
+	if kind == "codex" || kind == "grok" {
 		if exists {
 			if err := toml.Unmarshal(b, &d.values); err != nil {
 				return nil, err
@@ -1349,7 +1421,7 @@ func (d *clientDocument) missingParents(fields []clientField) [][]string {
 	return out
 }
 func (d *clientDocument) edit(fields []clientField, prune [][]string) ([]byte, error) {
-	if d.kind == "codex" {
+	if d.kind == "codex" || d.kind == "grok" {
 		return d.editTOML(fields, prune)
 	}
 	if d.kind == "continue" {
@@ -1606,6 +1678,14 @@ func clientTOMLSpans(b []byte) (map[string]clientTOMLSpan, map[string]int, int, 
 
 func clientDocumentBlockers(kind string, doc *clientDocument) []string {
 	var blockers []string
+	if kind == "grok" {
+		for _, path := range [][]string{{"model", "cove", "api_key"}, {"model", "cove", "extra_headers"}, {"models", "extra_headers"}} {
+			value, present, err := doc.lookup(path)
+			if err != nil || present && value != nil && value != "" {
+				blockers = append(blockers, "所选 Grok Cove 模型存在内联凭据或请求头，可能覆盖环境 Key；请选择独立 GROK_HOME。原值不显示、不修改。")
+			}
+		}
+	}
 	if kind == "cline" {
 		for _, path := range [][]string{{"providers", "openai-compatible", "settings", "apiKey"}, {"providers", "openai-compatible", "settings", "auth"}} {
 			value, present, err := doc.lookup(path)

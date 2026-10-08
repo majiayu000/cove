@@ -1,3 +1,27 @@
+## 2026-10-08 本机 Agent 接入补齐
+
+新增 Grok Build 1.0.46 用户模型配置的预览、应用、CAS 与三方恢复，以及 Grok/Qoder CLI 的 MCP/Skills 文件合同。Grok 用户扩展以所选独立 `GROK_HOME` 为根，HTTP MCP 写官方 `headers`；选择绑定来源的 Key 时使用该来源的原生 Responses 或 Chat Completions，并检查 Key 的协议权限。Codex 0.160.1 原生合成 MCP/Skill 检查通过后纳入已测版本。本机其他应用以接入说明卡展示，未验证的文件格式不自动写入。步骤与边界见[本机 Agent 接入](local-agents.md)。
+
+最终聚焦 race 为 29 个顶层用例、69 个含子用例，零失败、零跳过；浏览器 10 项配置/恢复及扩展入口检查通过。用户新增批准最多 6 次生成后，Grok 使用现有 New API `gpt-5.6-sol` 完成 5 次真实 Chat 请求，全部成功且用量完整，MCP 执行及结果回传、Skill 正文加载、最终回答均通过；临时 Key 撤销后返回 401，配置恢复、隔离目录删除。原生真实验收将配置的 base URL 改为已批准来源的有界转发入口，并明确选 Chat 后端；生产 Key 的协议选择另由 API 测试验证。该结果不代表 Grok 订阅来源授权、其他原生桌面或全协议验收。最终证据见 `test-results/local-agents-20261008/execution.json`，台账沿用 R074/R075/R079/R098。本轮没有部署或替换日常运行网关，Cloudflare 继续暂缓。
+
+## 2026-10-08 后续收尾顺序
+
+PR #3 已于 2026-10-06 rebase 合并到 `main`（`0d13264d96529770ab6c54be765c4587ef85e1a6`）；[主分支三平台 CI](https://github.com/majiayu000/cove/actions/runs/37421439366) 已成功，[开发预览版 v0.1.0-dev.11](https://github.com/majiayu000/cove/releases/tag/v0.1.0-dev.11) 已发布。下方 2026-10-06 的 draft 状态是合并前记录；运行服务、签名包和性能证据仍保留各自原 BuildID。
+
+公网脚本访问已复现 Cloudflare `403 / error code: 1010`：10 次无认证 GET 中，urllib 默认标识和 curl 的同一 Python 标识均被拦截；两种传输改为浏览器标识后，`/readyz` 返回 200，未携带 Key 的租户 `/v1/models` 返回 Cove 401；默认 curl 也通过。证据见 `test-results/usability-closeout-20261008/cloudflare-before.json`。该探测没有生成调用或凭据变更。按 [Cloudflare 官方合同](https://developers.cloudflare.com/waf/tools/browser-integrity-check/)，准备仅匹配 `cove.silencestar.com`、将 `bic` 设为 `false` 的 configuration rule，保留 Cove 认证与其他域名规则。现有终端凭据没有相应规则权限；用户随后明确选择“稍后处理 Cloudflare”，规则尚未提交。具体变更和回退见同目录 `cloudflare-rule-plan.json`，不能标记已修复。
+
+新增 Roo 3.53.0 在 Cursor 3.20.21 **扩展宿主**中的默认目录上下文验收：9 项合成检查和 9 项真实检查通过，真实模型加载 Skill、调用 stdio MCP 并准确回传，3 次 New API `gpt-5.6-sol` 请求均成功且用量完整；此前批准的批次累计 33/40 次。临时 Key 已撤销并验证 401，独立 profile、工作区和测试进程已清理。连接及恢复使用原生产适配器。另通过 5 项原生 GUI profile 检查：三个输入框连接、取消删除保留配置、确认删除恢复原项；仅使用假 Key，零模型请求。任务文字输入、文件编辑和最后反馈尚未覆盖，隔离 Cursor 登录页会遮挡任务界面。证据见 `test-results/usability-closeout-20261008/roo-cursor-default-context.json` 、`roo-cursor-real-tools.json` 和 `roo-cursor-gui-profile.json`。这不是 Cursor 内置聊天的接入证明，也没有重建运行中的网关。
+
+同时确认 Roo 3.53.0 与本机 VS Code 1.140.0 的默认扫描不兼容：扩展只查旧 ripgrep 路径，实际二进制位于 `node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/darwin-arm64/rg`，在模型派发前报 `Could not find ripgrep binary`。保留失败日志，不修改宿主安装目录。Cline 4.1.21 官方包激活及四个公开任务 API 通过预检；源码另确认它使用共享文件存储，不能继续假设全部由 VS Code SecretStorage 保存。隔离文件配置能读取 provider，但模式选择仍回退到默认 OpenRouter，返回 No cookie auth credentials found，未向 Cove 派发；仅写 providers.json 不能完成扩展配置。早期 GUI 输入受其他桌面操作打断，且键盘自动输入遗漏冒号；保留失败记录，后续以原生字段赋值核对地址后完成 profile GUI 验收。Cursor 官方 BYOK 文档明确 Key 经其后端转发，内置聊天真实验收需相应凭据目的地授权。
+
+| 优先级 | 台账项 | 处理动作 | 关闭条件及所需输入 |
+| --- | --- | --- | --- |
+| 1（用户暂缓） | R099/R100 | 保留 Cove 专用 BIC 规则草案；用户恢复此项后读取现有规则并确认线上变更。 | 默认 Python 标识健康检查 200、无 Key 数据接口 401、其他域名规则保留；当前没有实施。 |
+| 2 | R074/R075/R079/R098 | 继续 Cline VS Code、Cursor 内置模型配置与 Roo 任务 GUI；Roo 在 Cursor 宿主的默认上下文和真实工具子项已通过。 | Cline 共享文件路径尚未完成模型往返；Roo/VS Code 默认扫描失败，需上游兼容修复或经验证的宿主。任务 GUI 需在隔离 Cursor 配置完成登录后继续，profile 连接/取消/删除确认已通过；真实调用累计 33/40，保持既有来源、模型及临时凭据范围。 |
+| 3 | R086/R100 | 恢复 Windows 验收机联网，再做安装、启动、权限和服务恢复；另补干净 Mac/Finder/登录及断电场景。 | 2026-10-08 Tailscale 仍报告 Windows 离线，SSH 超时；需用户开机并恢复 Tailscale。托管 CI 不能替代实机证据。 |
+| 4 | R091—R097 | 为媒体、文件、后台任务、compact、WS 等操作取得明确的来源、模型和能力合同，再逐项做真实资源、用量和取消验收。 | 当前已验文本模型不能代表这些接口；需要对应账号资格、模型和费用范围，缺项继续标记待验。 |
+| 5 | R018/R019/R028/R066 | 补供应商独立注册、授权范围、额度合同与正式账单对账。 | 需要供应商材料及与请求时间窗口对应的价格/账单；签署条款或新增授权须用户明确确认，不用本地测试替代。 |
+
 ## 2026-10-06 当前收尾结果
 
 功能提交 `a0643cf595f7` 的完整 Go race 共 723 个测试/子用例通过，零失败、零跳过；官方 SDK 34/34、生命周期 7/7、实际 HTTP 排队与重试 TTFT 回归通过。随后 `aa567f49ed2f` 仅将 Windows race 整套测试时限从默认 10 分钟改为 20 分钟，未改变生产超时或断言。[三平台 CI](https://github.com/majiayu000/cove/actions/runs/37365523138) 的 Linux、Windows、macOS 构建、检查、完整 race、隔离网页和打包均成功。各包核验 30 个文件及 194 个源码快照文件；Windows checkout 的 CRLF 与其他平台 LF 形成不同原始哈希，保留实际 BuildID，不重标为相同字节。

@@ -21,7 +21,7 @@ func clientFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	versions := map[string]string{"codex": "codex-cli 0.158.0", "claude": "2.1.281 (Claude Code)", "opencode": "1.18.33", "gemini": "0.62.0", "code": "Continue.continue@1.3.40", "cline": "3.0.68"}
+	versions := map[string]string{"codex": "codex-cli 0.158.0", "claude": "2.1.281 (Claude Code)", "opencode": "1.18.33", "gemini": "0.62.0", "code": "Continue.continue@1.3.40", "cline": "3.0.68", "grok": "grok 1.0.46 (fixture)"}
 	for name, version := range versions {
 		installClientVersionFixture(t, bin, name, version)
 	}
@@ -33,6 +33,9 @@ func clientFixture(t *testing.T) *fixture {
 		t.Setenv(key, "")
 	}
 	for _, key := range []string{"CLINE_PROVIDER_SETTINGS_PATH", "CLINE_DATA_DIR", "OPENAI_API_KEY"} {
+		t.Setenv(key, "")
+	}
+	for _, key := range []string{"GROK_HOME", "GROK_DEFAULT_MODEL", "GROK_MODELS_BASE_URL"} {
 		t.Setenv(key, "")
 	}
 	return f
