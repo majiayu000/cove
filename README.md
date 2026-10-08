@@ -29,7 +29,11 @@ make build
 
 客户端工具页提供选定路径的预览、hash 冲突保护、原子修改和三方恢复。官方登录与 Cove 的 API Key 各有归属；未知版本或未解锁客户端只提供明确手动步骤。
 
+本机 Grok Build 1.0.46 已补自动模型配置及 MCP/Skills，真实工具调用与最终回复验收通过；Qoder CLI 1.1.12 已补 MCP/Skills 原生发现。其他本机应用的接入入口和待验边界见[本机 Agent 接入](docs/local-agents.md)。
+
 Roo Code 3.53.0 可安装 [Cove 原生适配器](scripts/roo-vscode/README.md)，在 VS Code 命令面板创建、选择和恢复独立 Cove profile；凭据交由 Roo 官方 API 保存。此入口与网页文件配置分开，网页的 Roo 文件自动写入仍不开放。
+
+Roo 的默认目录上下文、Skill/MCP 和真实模型往返已在 Cursor 3.20.21 扩展宿主通过。本机 VS Code 1.140.0 与 Roo 3.53.0 存在 ripgrep 路径不兼容，默认目录扫描会在请求前失败；使用前请阅读适配器的宿主说明。Cursor 内置聊天、Cline VS Code 自动模型配置及完整 GUI 验收仍待完成。
 
 ## 数据与运维
 

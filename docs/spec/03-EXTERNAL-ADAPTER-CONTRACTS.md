@@ -4,7 +4,7 @@
 
 ## 1. 证据、版本和完成口径
 
-本次固定以下源码快照，版本号来自该快照的包清单，**不代表本机已安装或本次运行通过**。Codex、Claude Code、Cursor 的安装版本只执行了版本读取。
+以下表格记录最初固定的源码快照，版本号来自包清单，本身不代表安装或运行通过。后续原生宿主和真实调用以各日期补充段及实施台账为准；2026-10-08 已增加 Cline 官方包激活、Roo 在 Cursor 扩展宿主的真实默认上下文和 profile GUI 验收。
 
 | 对象 | 固定版本/commit | 证据用途 |
 |---|---|---|
@@ -14,7 +14,7 @@
 | Qwen Code | `a63157304aeccafed6a700bd9566ccd84cf1edfa`；`0.24.7` | 历史device wire与现行停用说明，二者分别保留 |
 | OpenCode | `7945de208964a49300d7f770d1a71d078db9a4c4`；`1.18.33` | JSON/JSONC provider配置 |
 | Cline CLI | `3.0.68`；官方 npm 包及 `@cline/core 0.0.90` | 所选 providers.json、实际 SDK 解析与真实 CLI 工具两回合；见本节新增证据 |
-| Cline VS Code | `647d8cb059f5083c53d959609ce04c82647ae0d6`；`4.1.21` | 模型字段、SecretStorage、MCP及Skills |
+| Cline VS Code | `647d8cb059f5083c53d959609ce04c82647ae0d6`；`4.1.21` | 模型字段、共享文件存储、MCP及Skills；2026-10-08 复核官方包激活和公开 API |
 | Roo Code | `b867ec9145750d0ae1ff7f02d35406e9bf2a0b16`；`3.53.0` | provider profile、SecretStorage、项目MCP及Skills |
 | Continue VS Code | `5522c6f44ca0ac3528b37244818fbfa39b5af470`；`1.3.40` | YAML v1模型及MCP schema |
 | Cursor | 本机 `3.20.21`；官方文档 2026-09-30读取 | MCP/Skills文件；没有据此证明该版模型设置的稳定文件写接口 |
@@ -204,13 +204,13 @@ CLI 版本调用设 8 秒时限；应用前再次确认实际版本和环境，�
 
 这三者的模型设置不能在没有官方写接口时伪装成“写settings.json即可”。**文件自动写入与官方界面配置分别显示**；自动写目标仍保留D03，下面的手动路径不关闭该目标。
 
-Cline 4.1.21：在设置选择OpenAI Compatible，输入Base URL=`origin/v1`、Cove Key、public Model ID。配置需明确作用于Plan还是Act或两者。固定源码的非秘密字段包括openAiBaseUrl、planModeOpenAiModelId/actModeOpenAiModelId和两个模式的ApiProvider；openAiApiKey属于secret key集合。Cove不得直接写VS Code state.vscdb或模拟SecretStorage文件。若扩展没有稳定官方外部写接口，apply返回422 manual_action_required，并返回可复制的非秘密字段和用户自己完成输入的步骤；不报告applied。恢复由用户在同一模式选择原provider/model，清除这次Cove Key；Cove只保留原非秘密值，不导出原凭据。
+Cline 4.1.21：在 Cline 设置选择 OpenAI Compatible，填写 Base URL=`origin/v1`、Cove Key 和 public Model ID，并分别核对 Plan/Act 选择。2026-10-08 重新读取固定源码及官方 Marketplace 安装包：该版本以共享文件存储替代旧的 VS Code 原生存储，`CLINE_DATA_DIR` 优先于 `CLINE_DIR/data` 和 `~/.cline/data`；provider 凭据可位于权限为 0600 的 `settings/providers.json`，不能继续描述为仅由 SecretStorage 保存。其公开扩展 API 只有 startNewTask/sendMessage/pressPrimaryButton/pressSecondaryButton，官方普通 settings.json 没有模型配置项。官方包激活及公开 API 三项预检通过；隔离共享文件配置虽读取到 openai-compatible，SessionFactory 仍从 StateManager 选中默认 OpenRouter 并返回 No cookie auth credentials found，未向 Cove 派发；仅写 providers.json 不能更新扩展的 Plan/Act 选择，不能据此启用 VS Code 自动配置，也不能把 CLI 成功当作扩展成功。模型、模式选择和凭据仍通过官方界面手动设置、恢复；不直接改 state.vscdb 或私有 RPC。所有原生测试必须同时隔离 IDE profile 和 CLINE_DATA_DIR。
 
-Roo 3.53.0：新增独立 VS Code 适配器 `scripts/roo-vscode`，通过固定版本官方 `createProfile/getProfileEntry/getActiveProfile/setActiveProfile/deleteProfile` API 创建并选中 Cove profile，设置 OpenAI Compatible、Base URL、Key 和 model；不补猜测的 context/max output/价格。凭据由 Roo 官方存储，Cove 不直接访问 SecretStorage 或状态数据库。已有同名 profile 或未恢复记录时拒绝覆盖；记录原选中项和所建 ID，恢复保留用户后来选择。profile 被重新创建或原项删除时拒绝恢复；删除失败保留记录以供重试。由于 `getConfiguration` 过滤 secret，不能比较用户后来修改的 Key，删除前始终由原生提示确认。隔离宿主已验证创建、选择和生产恢复函数；验收的删除确认由预先批准的测试 fixture 提供，GUI 按钮仍未验。网页文件 autoapply 仍返回 422，此原生入口不冒充文件三方合并；真实工具范围见当前实施台账。
+Roo 3.53.0：新增独立 VS Code 适配器 `scripts/roo-vscode`，通过固定版本官方 `createProfile/getProfileEntry/getActiveProfile/setActiveProfile/deleteProfile` API 创建并选中 Cove profile，设置 OpenAI Compatible、Base URL、Key 和 model；不补猜测的 context/max output/价格。凭据由 Roo 官方存储，Cove 不直接访问 SecretStorage 或状态数据库。已有同名 profile 或未恢复记录时拒绝覆盖；记录原选中项和所建 ID，恢复保留用户后来选择。profile 被重新创建或原项删除时拒绝恢复；删除失败保留记录以供重试。由于 `getConfiguration` 过滤 secret，不能比较用户后来修改的 Key，删除前始终由原生提示确认。隔离宿主已验证创建、选择和生产恢复函数；早期删除使用预先批准的 fixture。2026-10-08 在 Cursor 扩展宿主用假 Key 补验原生连接输入及恢复的取消/确认按钮，5 项检查通过；任务文字输入、编辑及最终反馈仍待验。网页文件 autoapply 仍返回 422，此原生入口不冒充文件三方合并；真实工具范围见当前实施台账。
 
-Cursor 3.20.21：本轮只证明已安装该版；旧API Keys文档URL现在重定向到文档首页，没有得到该版本稳定的BYOK文件写schema或Cove loopback请求路径证明。模型配置的自动apply返回422并显示“该版本模型配置自动写入尚未验证”；不能写猜测字段，也不能创建公网隧道绕开本机网关边界。MCP/Skills的公开文件入口可独立设计，不由此宣传模型/agent接入已支持。D03解除需要该版官方模型配置API/导入格式，或用户认可只保留手动接入的范围调整。
+Cursor 3.20.21：2026-10-08 官方 BYOK 文档已可读取，入口为 Settings > Models，选择提供方后填 Key 并保存；文档只声明聊天模型，自定义 Key 不覆盖 Tab 补全，OpenAI 列表限其支持的标准非推理聊天模型。每次请求的 Key 会加密传至 Cursor 后端进行提示词构建，不能沿用“只交给本地 IDE”的授权推定用户允许这一目的地。仍未取得该版本稳定的 BYOK 文件写 schema 或 Cove 端点实际往返证明；模型自动 apply 继续返回 422，不能写猜测字段。Roo 在 Cursor 扩展宿主中的独立 provider 已完成真实 Skill/MCP 和默认目录上下文验收，这不关闭 Cursor 内置模型配置的 D03。
 
-依据：[Cline配置入口](https://docs.cline.bot/provider-config/openai-compatible)、[Cline字段及secret集合](https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/apps/vscode/src/shared/storage/state-keys.ts)、[Roo profile存储](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/ProviderSettingsManager.ts)、[Roo接入](https://roocodeinc.github.io/Roo-Code/providers/openai-compatible/)。
+依据：[Cline配置入口](https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/docs/provider-config/openai-compatible.mdx)、[Cline共享存储](https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/apps/vscode/src/shared/storage/storage-context.ts)、[Cline公开 API](https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/apps/vscode/src/exports/cline.d.ts)、[Roo profile存储](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/config/ProviderSettingsManager.ts)、[Roo接入](https://roocodeinc.github.io/Roo-Code/providers/openai-compatible/)、[Cursor BYOK](https://cursor.com/help/models-and-usage/api-keys)。
 
 ### 5.5 MCP与Skills具体落点
 
@@ -224,12 +224,18 @@ Cursor 3.20.21：本轮只证明已安装该版；旧API Keys文档URL现在重�
 | Roo | 项目.roo/mcp.json的mcpServers.{name}；global使用扩展打开的实际settings文件路径，不能猜宿主目录 | 项目.roo/skills/{name}/SKILL.md；用户~/.roo/skills；不顺带更新.agents共享目录 |
 | Continue | ~/.continue/config.yaml的mcpServers列表；唯一name；stdio command/args/env/cwd；HTTP type=streamable-http、url及requestOptions.headers | 项目.continue/skills/{name}/SKILL.md、用户~/.continue/skills；frontmatter需要非空name/description；加载器还扫描.claude，但Cove只写选定的.continue路径；readSkill按name查找，重复name必须在预览报冲突 |
 | Cursor | 项目.cursor/mcp.json或用户~/.cursor/mcp.json；mcpServers.{name}；stdio command/args/env或HTTP url/headers；secret用`${env:NAME}` | 项目.cursor/skills/{name}/SKILL.md；用户~/.cursor/skills；不会自动打开云同步 |
+| Grok Build 1.0.46 | 用户以所选 GROK_HOME 为根，config.toml 的 mcp_servers.{name}；项目 .grok/config.toml；stdio command/args/env；HTTP url/headers/bearer_token_env_var，不能用 Codex 的 http_headers | 用户 GROK_HOME/skills/{name}/SKILL.md；项目 .grok/skills/{name}/SKILL.md；不增加嵌套 .grok 用户目录 |
+| Qoder CLI 1.1.12 | 用户或项目 .qoder/settings.json、项目 .mcp.json；mcpServers.{name}；type=stdio 的 command/args/env 或 type=http 的 url/headers | 用户或项目 .qoder/skills/{name}/SKILL.md；已验证原生发现，实际 MCP 执行与模型 BYOK 向导仍待验 |
 
 每个MCP只写选定名字；同名不同定义报409并提供diff。stdio配置完成不代表程序已被启动或能工作；只有客户端在自己的授权边界内实际列出工具后才标activation_verified。HTTP OAuth session由客户端自己管理，Cove不拷贝其缓存。Cove只处理配置与文件，不成为MCP执行代理。
 
 技能目录输入必须解析到用户授权的根内；文件清单包含相对路径、hash与大小。目标已存在时逐文件做三方比较；被用户修改的SKILL.md保留conflict，不能整目录删除。复制不执行脚本、不安装依赖、不改全局agent指令。Continue的固定加载器和readSkill调用已核对：[加载器](https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/config/markdown/loadMarkdownSkills.ts)、[工具调用](https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/tools/implementations/readSkill.ts)。其他客户端同一name在全局/项目已有副本时列出实际优先级；不能只校验文件写成功就说客户端会使用新版本。
 
 依据：[Codex MCP](https://developers.openai.com/codex/mcp)、[Claude MCP](https://code.claude.com/docs/en/mcp)、[Claude Skills](https://code.claude.com/docs/en/skills)、[Cursor MCP](https://cursor.com/docs/mcp)、[Cursor Skills](https://cursor.com/docs/skills)、[Continue MCP schema](https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/config-yaml/src/schemas/mcp/index.ts)、[Cline Skills](https://github.com/cline/cline/blob/647d8cb059f5083c53d959609ce04c82647ae0d6/docs/customization/skills.mdx)、[Roo Skills](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/apps/docs/docs/features/skills.mdx)。
+
+2026-10-08：Grok 模型配置仅写用户所选 `GROK_HOME/config.toml` 的 `models.default=cove` 与 `model.cove` 的 model/name/base_url/api_backend/env_key；API Key 只经进程环境 `COVE_API_KEY` 引用。选定来源 Key 后，Chat 来源用 `chat_completions`，其他来源默认 `responses`，Key 不允许该协议时阻止应用；路由 Key 或未选 Key 仍需核对实际入口。已有内联凭据、请求头覆盖、错误 scope/路径、未知版本和并发改动会阻止自动应用。Qoder CLI 的模型 BYOK 只走官方 `/model → Custom → Add custom model`，不手写其模型凭据。官方依据：[Grok Settings](https://docs.x.ai/build/settings)、[Grok Reference](https://docs.x.ai/build/settings/reference)、[Qoder MCP](https://docs.qoder.com/cli/mcp-reference)、[Qoder Custom Models](https://docs.qoder.com/cli/custom-models)。
+
+Grok 原生 stdio 工具闭环和 HTTP Header/Bearer 握手合成检查通过；真实 New API 的 5 次 Chat 请求全部成功、usage 完整，MCP/Skill/最终回复通过。Codex 本机 0.160.1 的新增证据为原生合成 MCP/Skill，Qoder 为原生发现。配置生成、原生读取与真实调用分列，完整边界及最终文件见[本机 Agent 接入](../local-agents.md)和 `test-results/local-agents-20261008/execution.json`。
 
 ### 5.6 三方恢复的精确判定
 
@@ -278,3 +284,5 @@ D01解除需要供应商支持的Cove独立client metadata和身份资格证据�
 ### 2026-10-06 Roo 原生 profile API 入口
 
 固定 3.53.0 的 [公开 API](https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/exports/api.ts) 支持原生 profile 的创建、选择和删除，因此采用独立 VSIX，避免启动导入的合并残留。该源码实际 SHA-256 为 `a9ba811c0758214f7e1e8db04dfee8a325e519186ced46cd06f64042a7df8785`。隔离 VS Code 1.140.0 安装的官方 Roo 3.53.0 主 bundle SHA-256 为 `3e8b123dc48eea38f540f1eacfba3d33b0532f1fd64f27b25b3fe440cdb1cbf9`；`test-results/followup-20261006/roo-host-preflight.json` 的六项宿主检查通过。原生创建用实际命令，删除用同一生产恢复函数和已批准的可清理 fixture，未操作日常 IDE 或把 GUI 确认算作已验。
+
+2026-10-08 补充：Roo 3.53.0 在 Cursor 3.20.21 扩展宿主保留默认目录上下文，合成及真实验收各 9 项通过，3 次 New API 请求成功、用量完整，临时 Key 撤销 401 和隔离目录清理已验。当前 VS Code 1.140.0 的 ripgrep 安装路径不在 Roo 查找列表中，默认扫描在请求前失败；没有改写宿主或供应商代码。真实报告为 `test-results/usability-closeout-20261008/roo-cursor-real-tools.json`，失败日志为同目录 `roo-default-context-diagnostic-logs.json`；同目录 `roo-cursor-gui-profile.json` 另记录 5 项假 Key 的原生 profile 输入和恢复取消/确认检查通过；任务文字输入/编辑/最终反馈受隔离 Cursor 登录页阻挡，Cursor 内置聊天仍待验。

@@ -40,6 +40,8 @@ func extensionCards() []extensionCard {
 		{"roo", "3.53.0", ".roo/skills", ".roo/skills", []string{".roo/mcp.json"}, []string{"<所选实际 MCP settings 文件>"}},
 		{"continue", "1.3.40", ".continue/skills", ".continue/skills", nil, []string{".continue/config.yaml"}},
 		{"cursor", "3.20.21", ".cursor/skills", ".cursor/skills", []string{".cursor/mcp.json"}, []string{".cursor/mcp.json"}},
+		{"grok", "1.0.46", ".grok/skills", "skills", []string{".grok/config.toml"}, []string{"config.toml"}},
+		{"qodercli", "1.1.12", ".qoder/skills", ".qoder/skills", []string{".qoder/settings.json", ".mcp.json"}, []string{".qoder/settings.json"}},
 	}
 }
 
@@ -282,7 +284,7 @@ func extensionDefinition(in extensionInput) (map[string]any, error) {
 				def["env"] = in.Env
 			}
 			switch in.Client {
-			case "claude", "roo":
+			case "claude", "roo", "qodercli":
 				def["type"] = "stdio"
 				if in.Client == "roo" {
 					def["disabled"] = false
@@ -300,7 +302,7 @@ func extensionDefinition(in extensionInput) (map[string]any, error) {
 			return nil, extensionError(400, "HTTP配置不能包含stdio字段", "transport")
 		}
 		switch in.Client {
-		case "codex":
+		case "codex", "grok":
 			def["url"] = in.URL
 			if in.BearerEnv != "" {
 				if !extensionEnvName(in.BearerEnv) {
@@ -309,7 +311,11 @@ func extensionDefinition(in extensionInput) (map[string]any, error) {
 				def["bearer_token_env_var"] = in.BearerEnv
 			}
 			if len(in.Headers) > 0 {
-				def["http_headers"] = in.Headers
+				if in.Client == "grok" {
+					def["headers"] = in.Headers
+				} else {
+					def["http_headers"] = in.Headers
+				}
 			}
 		case "gemini":
 			def["httpUrl"] = in.URL
@@ -331,14 +337,14 @@ func extensionDefinition(in extensionInput) (map[string]any, error) {
 			}
 		default:
 			def["url"] = in.URL
-			if in.Client == "claude" || in.Client == "roo" {
+			if in.Client == "claude" || in.Client == "roo" || in.Client == "qodercli" {
 				def["type"] = "http"
 			}
 			if len(in.Headers) > 0 {
 				def["headers"] = in.Headers
 			}
 		}
-		if in.BearerEnv != "" && in.Client != "codex" {
+		if in.BearerEnv != "" && in.Client != "codex" && in.Client != "grok" {
 			return nil, extensionError(422, "此客户端未核验 bearer_token_env_var 字段；使用官方支持的 header 引用或明确私有文件", "bearer_token_env_var")
 		}
 	}
@@ -830,7 +836,7 @@ func extensionReadMCP(client, name string, b []byte, exists bool) (any, bool, bo
 	if client == "opencode" {
 		kind = "opencode"
 	}
-	if client == "codex" {
+	if client == "codex" || client == "grok" {
 		kind = "codex"
 	}
 	doc, err := parseClientDocument(kind, "", b, true)
@@ -838,7 +844,7 @@ func extensionReadMCP(client, name string, b []byte, exists bool) (any, bool, bo
 		return nil, false, false, err
 	}
 	parent := "mcpServers"
-	if client == "codex" {
+	if client == "codex" || client == "grok" {
 		parent = "mcp_servers"
 	}
 	if client == "opencode" {
@@ -858,7 +864,7 @@ func extensionNormalize(value any) any {
 	return normalized
 }
 func extensionEditMCP(client, name string, b []byte, exists bool, value any, present, prune bool) ([]byte, error) {
-	if client == "codex" {
+	if client == "codex" || client == "grok" {
 		return extensionEditTOMLMCP(name, b, value, present)
 	}
 	if client == "continue" {
