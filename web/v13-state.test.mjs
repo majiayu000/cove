@@ -38,6 +38,16 @@ test("configured client means checked selected fields, never an inferred connect
   assert.equal(clientDisplay({status:"installed"},true).val,"Choose model");
 });
 
+test("manual clients expose setup guidance and remain unverified", () => {
+  const card = {status:"manual_setup",manual_setup:"Follow the official setup guide",configuration:{state:"not_configured"}};
+  const shown = clientDisplay(card);
+  assert.equal(shown.stZh,"接入待核验");
+  assert.equal(shown.stEn,"Setup unverified");
+  assert.equal(shown.title,card.manual_setup);
+  assert.equal(shown.currentModel,"");
+  assert.equal(shown.dot,"var(--warn)");
+});
+
 test("route slots use shared-account counts and actual exclusion reasons", () => {
   const member={model_id:"model"};
   const route={enabled:true,runtime:{candidates:[{model_id:"model",eligible:false,reason:"账号认证被上游拒绝"}]}};

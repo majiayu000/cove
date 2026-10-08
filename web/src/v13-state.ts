@@ -10,7 +10,9 @@ export function clientDisplay(c: any, en = false) {
     unverified: ["待核对", "Unknown"], not_configured: ["待配置", "Configure"],
   };
   const installed = c.status === "installed";
+  const manual = c.status === "manual_setup";
   const label = c.status === "not_installed" ? ["未安装", "Not installed"] :
+    manual ? ["接入待核验", "Setup unverified"] :
     c.status === "unsupported_version" ? ["版本未核验", "Unsupported"] :
     !installed ? ["检测失败", "Unknown"] : labels[cfg?.state] || ["状态未知", "Unknown"];
   const model = cfg?.state === "configured" ? cfg.model || "" : "";
@@ -21,7 +23,7 @@ export function clientDisplay(c: any, en = false) {
     valC: model ? "var(--ink)" : "var(--accent)",
     stZh: label[0], stEn: label[1],
     dot: c.status === "not_installed" ? "var(--ink3)" : installed && model ? "var(--ok)" : "var(--warn)",
-    title: cfg?.reason || (en ? "Configuration has not been checked" : "配置状态尚未读取"),
+    title: (manual && c.manual_setup) || cfg?.reason || (en ? "Configuration has not been checked" : "配置状态尚未读取"),
   };
 }
 
