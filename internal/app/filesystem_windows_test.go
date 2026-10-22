@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"unsafe"
 
@@ -59,31 +59,34 @@ func TestSpecWindowsClientFileACLAndRootPublication(t *testing.T) {
 	}
 }
 
+var clientVersionFixtureBinary string
+
 func TestMain(m *testing.M) {
-	executable, err := os.Executable()
+	dir, err := os.MkdirTemp("", "cove-version-fixture-")
 	if err != nil {
 		panic(err)
 	}
-	name := strings.TrimSuffix(filepath.Base(executable), ".exe")
-	if name == "codex" || name == "claude" || name == "opencode" || name == "gemini" || name == "code" || name == "cline" || name == "grok" {
-		version, err := os.ReadFile(filepath.Join(filepath.Dir(executable), ".cove-fixture-"+name+"-version"))
-		if err != nil {
-			panic(err)
-		}
-		fmt.Print(string(version) + "\n")
-		os.Exit(0)
+	// Compile a tiny version printer once. Copying the race test executable
+	// repeats all application/SDK initialization and race exit delays per probe.
+	clientVersionFixtureBinary = filepath.Join(dir, "client-version.exe")
+	command := exec.Command("go", "build", "-o", clientVersionFixtureBinary, "./testdata/client-version")
+	code := 1
+	if output, err := command.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "build client version fixture: %v\n%s", err, output)
+	} else {
+		code = m.Run()
 	}
-	os.Exit(m.Run())
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "remove client version fixture:", err)
+		code = 1
+	}
+	os.Exit(code)
 }
 func installClientVersionFixture(t *testing.T, dir, name, version string) {
 	t.Helper()
 	target := filepath.Join(dir, name+".exe")
 	if _, err := os.Stat(target); os.IsNotExist(err) {
-		executable, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		content, err := os.ReadFile(executable)
+		content, err := os.ReadFile(clientVersionFixtureBinary)
 		if err != nil {
 			t.Fatal(err)
 		}
