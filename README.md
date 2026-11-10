@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Superseded by [litellm-rs](https://github.com/majiayu000/litellm-rs)** — self-hosted Rust LLM gateway.
+
 # Cove · 栖港
 
 你的模型，泊在一处。
