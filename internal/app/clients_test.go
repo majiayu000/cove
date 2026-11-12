@@ -69,6 +69,7 @@ func TestSpecClientConfigVerifiedLaterVersions(t *testing.T) {
 		{"codex", "user", "config.toml", "codex-cli 0.160.0", "model_provider"},
 		{"codex", "user", "config.toml", "codex-cli 0.166.0", "model_provider"},
 		{"claude", "project", filepath.Join(".claude", "settings.local.json"), "2.1.317 (Claude Code)", "ANTHROPIC_BASE_URL"},
+		{"opencode", "project", "opencode.json", "1.19.5", "provider"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.version, func(t *testing.T) {
