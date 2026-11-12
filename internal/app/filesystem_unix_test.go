@@ -4,6 +4,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,9 +26,38 @@ func TestSpecClientVersionChildPipeWaitBounded(t *testing.T) {
 	}
 }
 
+var clientVersionFixtureDir string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "cove-version-fixture-")
+	if err != nil {
+		panic(err)
+	}
+	clientVersionFixtureDir = dir
+	code := m.Run()
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "remove client version fixture:", err)
+		code = 1
+	}
+	os.Exit(code)
+}
+
+// macOS scans every new executable on its first run. A fresh script per test
+// queued those scans past the detection timeout, so each version printer is
+// written once and linked into the test's PATH directory.
 func installClientVersionFixture(t *testing.T, dir, name, version string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0700); err != nil {
+	script := filepath.Join(clientVersionFixtureDir, fmt.Sprintf("%x", sha256.Sum256([]byte(version))))
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(dir, name)
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(script, target); err != nil {
 		t.Fatal(err)
 	}
 }

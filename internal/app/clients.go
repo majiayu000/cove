@@ -91,11 +91,9 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 		return card
 	}
 	card.Binary = binary
-	timeout := 3 * time.Second
-	if card.Kind == "cline" {
-		timeout = 8 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// A first run can spend seconds in macOS executable scanning; OpenCode
+	// 1.1.26 alone takes 3.5s for --version. Cards are detected in parallel.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	args := []string{"--version"}
 	if card.Kind == "continue" {
