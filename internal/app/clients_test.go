@@ -64,20 +64,29 @@ func clientRoot(t *testing.T) string {
 	return root
 }
 
-func TestSpecClientConfigVerifiedCodex0160(t *testing.T) {
-	f := clientFixture(t)
-	bin := t.TempDir()
-	installClientVersionFixture(t, bin, "codex", "codex-cli 0.160.0")
-	t.Setenv("PATH", bin)
-	root := clientRoot(t)
-	path := filepath.Join(root, "config.toml")
-	preview := clientPreviewFor(t, f.a, "codex", "user", root, path)
-	if preview.Status != "ready" || preview.Version != "codex-cli 0.160.0" {
-		t.Fatal("verified current CLI was blocked", preview)
+func TestSpecClientConfigVerifiedLaterVersions(t *testing.T) {
+	cases := []struct{ kind, scope, path, version, field string }{
+		{"codex", "user", "config.toml", "codex-cli 0.160.0", "model_provider"},
+		{"codex", "user", "config.toml", "codex-cli 0.166.0", "model_provider"},
+		{"claude", "project", filepath.Join(".claude", "settings.local.json"), "2.1.317 (Claude Code)", "ANTHROPIC_BASE_URL"},
 	}
-	change := clientApply(t, f.a, preview)
-	if change.State != "applied" || !strings.Contains(string(readClient(t, path)), "model_provider") {
-		t.Fatal("current client configuration was not applied")
+	for _, tc := range cases {
+		t.Run(tc.version, func(t *testing.T) {
+			f := clientFixture(t)
+			bin := t.TempDir()
+			installClientVersionFixture(t, bin, tc.kind, tc.version)
+			t.Setenv("PATH", bin)
+			root := clientRoot(t)
+			path := filepath.Join(root, tc.path)
+			preview := clientPreviewFor(t, f.a, tc.kind, tc.scope, root, path)
+			if preview.Status != "ready" || preview.Version != tc.version {
+				t.Fatal("verified client version was blocked", preview)
+			}
+			change := clientApply(t, f.a, preview)
+			if change.State != "applied" || !strings.Contains(string(readClient(t, path)), tc.field) {
+				t.Fatal("verified client configuration was not applied")
+			}
+		})
 	}
 }
 

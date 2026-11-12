@@ -17,7 +17,12 @@ import (
 )
 
 // The installed CLI uses --bare and its own config directory; no subscription login.
-func TestClaudeCLIToolLoop(t *testing.T) {
+func TestClaudeCLIToolLoop(t *testing.T) { claudeCLIToolLoop(t, false) }
+
+// The generated variant writes the project settings with the production
+// field generator and passes only the Key, as the configuration card does.
+func TestClaudeCLIGeneratedConfigToolLoop(t *testing.T) { claudeCLIToolLoop(t, true) }
+func claudeCLIToolLoop(t *testing.T, generated bool) {
 	if os.Getenv("GATT_CLAUDE_E2E") != "1" {
 		t.Skip("set GATT_CLAUDE_E2E=1 to exercise installed Claude Code")
 	}
@@ -115,9 +120,34 @@ func TestClaudeCLIToolLoop(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "--bare", "--print", "--no-session-persistence", "--strict-mcp-config", "--tools", "Bash", "--allowedTools", "Bash(printf *)", "--model", "fixture-model", "Run the provided synthetic printf tool and report its result.")
+	// Both tool flags take variadic lists, so a single-value flag must end them.
+	args := []string{"--bare", "--print", "--strict-mcp-config", "--tools", "Bash", "--allowedTools", "Bash(printf *)", "--no-session-persistence"}
+	prompt := "Run the provided synthetic printf tool and report its result."
+	env := []string{"PATH=" + os.Getenv("PATH"), "CLAUDE_CONFIG_DIR=" + config, "ANTHROPIC_BASE_URL=" + f.server.URL, "ANTHROPIC_API_KEY=" + f.key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "NO_COLOR=1"}
+	if generated {
+		settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
+		document, err := parseClientDocument("claude", settingsPath, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settings, err := document.edit(clientDesiredFields("claude", "fixture-model", f.server.URL), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.MkdirAll(filepath.Dir(settingsPath), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(settingsPath, settings, 0600); err != nil {
+			t.Fatal(err)
+		}
+		env = []string{"PATH=" + os.Getenv("PATH"), "CLAUDE_CONFIG_DIR=" + config, "ANTHROPIC_AUTH_TOKEN=" + f.key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "NO_COLOR=1"}
+	}
+	if !generated {
+		args = append(args, "--model", "fixture-model")
+	}
+	cmd := exec.CommandContext(ctx, binary, append(args, prompt)...)
 	cmd.Dir = dir
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "CLAUDE_CONFIG_DIR=" + config, "ANTHROPIC_BASE_URL=" + f.server.URL, "ANTHROPIC_API_KEY=" + f.key, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "NO_COLOR=1"}
+	cmd.Env = env
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Claude client failed: %v\n%s", err, redact(string(output), f.key))

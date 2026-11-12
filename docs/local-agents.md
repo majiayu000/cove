@@ -22,7 +22,7 @@
 
 | 客户端 | Cove 当前接入方式与边界 |
 |---|---|
-| Codex CLI | 已有模型配置与 MCP/Skills；本机 0.160.1 新增原生合成工具检查，历史真实证据保留 |
+| Codex CLI | 已有模型配置与 MCP/Skills；本机 0.160.1、0.166.0 原生合成工具检查通过，历史真实证据保留 |
 | Claude Code / OpenCode / Cline CLI / Continue / Roo | 沿用已实现的专用适配；具体版本、宿主和真实验收边界见实施台账，CLI 与 IDE 扩展分别记录 |
 | Qoder CLI 1.1.12 | 已补 MCP/Skills 文件适配并验证原生发现；模型必须走 `/model → Custom → Add custom model`，以当前账号的供应商目录为准，不能手写 BYOK settings.json；实际 MCP 执行和模型向导待验 |
 | Qoder 桌面 | 官方 Settings → Models → Add → Custom → OpenAI Compatible；本机原生设置和真实调用待验 |
