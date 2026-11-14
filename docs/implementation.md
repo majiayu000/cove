@@ -1,3 +1,9 @@
+## 2026-11-12 本机客户端新版本复验
+
+本机已安装 Codex 0.166.0 与 Claude Code 2.1.317，两者都用合成上游和隔离目录复验，不访问账号。Codex 读取产品 `clientDesiredFields` 与 TOML 编辑器生成的 `config.toml`，完成两轮工具及 MCP/Skill 两轮（`GATT_CODEX_E2E=1`）。Claude Code 新增 `TestClaudeCLIGeneratedConfigToolLoop`：以产品生成的项目 `.claude/settings.local.json` 提供 `model` 与 `env.ANTHROPIC_BASE_URL`，进程只传 `ANTHROPIC_AUTH_TOKEN`，完成 Bash 两轮及两条用量结算；把配置模型改成不存在的名字时客户端报 unrecognized_model，确认模型来自该文件（该反例为手动检查，未入库）。两个版本加入已核验配置版本，未知版本仍保持拒绝。OpenCode 新增 `TestOpenCodeCLIGeneratedConfigToolLoop`（`GATT_OPENCODE_E2E=1`）：官方 npm `opencode-ai@1.19.5` 装在隔离目录，读取产品生成的项目 `opencode.json`，经 Cove 原生 Chat Completions 完成 bash 两轮（含客户端自身的标题请求共 3 次）；配置模型改为不存在的名字时失败，确认模型来自该文件。1.19.5 加入已核验版本。本机 Homebrew 原装的 1.1.26（2026-01 安装，来自 `anomalyco/tap`）在同一测试中 90 秒无响应，不加入；2026-11-14 仅信任 `anomalyco/tap/opencode` 这一 formula 后升级到 1.19.5，本机安装同测试通过。这不代表真实订阅、长会话、parallel、WS 或 compact 验收，台账沿用 R074/R077/R078。
+
+版本探测超时由 3 秒（Cline 8 秒）统一为 15 秒：本机 `opencode --version` 实测 3.5 秒，macOS 首次执行新程序的扫描也会占用数秒。
+
 ## 2026-10-08 本机 Agent 接入补齐
 
 新增 Grok Build 1.0.46 用户模型配置的预览、应用、CAS 与三方恢复，以及 Grok/Qoder CLI 的 MCP/Skills 文件合同。Grok 用户扩展以所选独立 `GROK_HOME` 为根，HTTP MCP 写官方 `headers`；选择绑定来源的 Key 时使用该来源的原生 Responses 或 Chat Completions，并检查 Key 的协议权限。Codex 0.160.1 原生合成 MCP/Skill 检查通过后纳入已测版本。本机其他应用以接入说明卡展示，未验证的文件格式不自动写入。步骤与边界见[本机 Agent 接入](local-agents.md)。

@@ -48,9 +48,9 @@ type clientCard struct {
 func clientCards() []clientCard {
 	home, _ := os.UserHomeDir()
 	return append([]clientCard{
-		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0/0.160.1 production-generated config and isolated two-round tool loop verified"},
-		{Kind: "claude", Name: "Claude Code", ContractVersion: "2.1.281", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".claude", "settings.json")}, "project": {"<项目>/.claude/settings.local.json"}}, Evidence: "Cove v1.2 external contracts 5.2; code.claude.com/docs/en/settings and llm-gateway"},
-		{Kind: "opencode", Name: "OpenCode", ContractVersion: "1.18.33", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".config", "opencode", "opencode.json")}, "project": {"<项目>/opencode.json", "<项目>/opencode.jsonc"}}, Evidence: "Cove v1.2; sst/opencode 7945de208964a49300d7f770d1a71d078db9a4c4; 1.18.27 isolated debug config --pure parser accepted"},
+		{Kind: "codex", Name: "Codex CLI", ContractVersion: "0.158.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CODEX_HOME>/config.toml"}, "project": {"<项目>/.codex/config.toml"}}, Evidence: "Cove v1.2; openai/codex 064c6b8c737f5b41d171fdda80bd9ef10ad06eb3; 0.156.1 isolated features list config parser accepted; 0.160.0/0.160.1/0.166.0 production-generated config and isolated two-round tool loop verified; 0.166.0 MCP and Skill loop verified"},
+		{Kind: "claude", Name: "Claude Code", ContractVersion: "2.1.281", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".claude", "settings.json")}, "project": {"<项目>/.claude/settings.local.json"}}, Evidence: "Cove v1.2 external contracts 5.2; code.claude.com/docs/en/settings and llm-gateway; 2.1.317 production-generated project settings with ANTHROPIC_AUTH_TOKEN and isolated two-round tool loop verified"},
+		{Kind: "opencode", Name: "OpenCode", ContractVersion: "1.18.33", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".config", "opencode", "opencode.json")}, "project": {"<项目>/opencode.json", "<项目>/opencode.jsonc"}}, Evidence: "Cove v1.2; sst/opencode 7945de208964a49300d7f770d1a71d078db9a4c4; 1.18.27 isolated debug config --pure parser accepted; 1.19.5 production-generated project opencode.json and isolated two-round tool loop verified"},
 		{Kind: "gemini", Name: "Gemini CLI", ContractVersion: "0.62.0", Scopes: []string{"user", "project"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".gemini", "settings.json")}, "project": {"<项目>/.gemini/settings.json"}}, Evidence: "Gemini CLI 0.62.0; geminicli.com/docs/reference/configuration; gemini-api-key auth and GOOGLE_GEMINI_BASE_URL loopback override"},
 		{Kind: "continue", Name: "Continue (VS Code)", ContractVersion: "1.3.40", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {filepath.Join(home, ".continue", "config.yaml")}}, Evidence: "Continue 1.3.40; docs.continue.dev/reference and local secrets contract; selected config.yaml only, IDE activation requires separate acceptance"},
 		{Kind: "cline", Name: "Cline CLI", ContractVersion: "3.0.68", Scopes: []string{"user"}, RecommendedPaths: map[string][]string{"user": {"<选定的独立 CLINE_DATA_DIR>/settings/providers.json"}}, Evidence: "Official cline 3.0.68 and @cline/core 0.0.90; ProviderSettingsManager schema and actual CLI OPENAI_API_KEY/Chat boundary verified; VS Code extension is a separate client"},
@@ -91,11 +91,9 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 		return card
 	}
 	card.Binary = binary
-	timeout := 3 * time.Second
-	if card.Kind == "cline" {
-		timeout = 8 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// A first run can spend seconds in macOS executable scanning; OpenCode
+	// 1.1.26 alone takes 3.5s for --version. Cards are detected in parallel.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	args := []string{"--version"}
 	if card.Kind == "continue" {
@@ -134,7 +132,7 @@ func detectClient(ctx context.Context, card clientCard) clientCard {
 		version = strings.TrimPrefix(version, "grok ")
 		version, _, _ = strings.Cut(version, " ")
 	}
-	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0" || version == "0.160.1") || card.Kind == "opencode" && version == "1.18.27"
+	valid := version == card.ContractVersion || card.Kind == "codex" && (version == "0.156.1" || version == "0.160.0" || version == "0.160.1" || version == "0.166.0") || card.Kind == "claude" && version == "2.1.317" || card.Kind == "opencode" && (version == "1.18.27" || version == "1.19.5")
 	if valid {
 		card.Status = "installed"
 	} else {
