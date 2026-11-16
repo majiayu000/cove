@@ -63,7 +63,7 @@ func syntheticUpdateSwitch(t *testing.T, platform ...string) (platformEnvironmen
 }
 
 func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
-	for _, scenario := range []string{"success", "readiness-failure", "schema-change", "admission-open", "activation-unknown", "snapshot-rejection", "spawn-failure"} {
+	for _, scenario := range []string{"success", "slow-stop", "readiness-failure", "schema-change", "admission-open", "activation-unknown", "snapshot-rejection", "spawn-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			env, journal, filename := syntheticUpdateSwitch(t)
 			activeBuild := journal.OldBuildID
@@ -97,6 +97,12 @@ func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// The deadline only bounds a hung switch; how long snapshot and stop take
+			// depends on the host. Scenarios whose new instance must never pass the
+			// closed-admission check end the readiness wait themselves, by cancelling
+			// the caller once that instance has answered a state probe.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			env.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
 				if name == "launchctl" {
 					return nil, errServiceAbsent
@@ -134,6 +140,11 @@ func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
 					events = append(events, "resume")
 					return restoreTestResponse(200, "{}"), nil
 				case "/__cove/stop":
+					if scenario == "slow-stop" {
+						// Outlasts the 1.2 s the whole switch once had to fit in; a loaded
+						// Windows runner did not.
+						time.Sleep(1300 * time.Millisecond)
+					}
 					events = append(events, "stop-"+activeBuild)
 					running = false
 					owner.Close()
@@ -141,6 +152,9 @@ func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
 					return restoreTestResponse(202, ""), nil
 				case "/__cove/state":
 					initialized := !(activeBuild == journal.NewBuildID && scenario == "readiness-failure")
+					if activeBuild == journal.NewBuildID && (scenario == "readiness-failure" || scenario == "admission-open") {
+						cancel()
+					}
 					return restoreTestResponse(200, `{"admission_closed":`+map[bool]string{true: "true", false: "false"}[closed]+`,"initialized_ready":`+map[bool]string{true: "true", false: "false"}[initialized]+`}`), nil
 				case "/__cove/activate":
 					closed = false
@@ -185,8 +199,6 @@ func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
 				publish(activeBuild)
 				return nil
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
-			defer cancel()
 			err := env.applyUpdateSwitch(ctx, filename, spawn)
 			updated, readErr := readUpdateJournal(filename, env)
 			if readErr != nil {
@@ -194,7 +206,7 @@ func TestSpecUpdateSwitchClosedReadinessAndRollback(t *testing.T) {
 			}
 			targetSHA, _ := fileSHA(journal.Target)
 			switch scenario {
-			case "success":
+			case "success", "slow-stop":
 				if err != nil || updated.Phase != "succeeded" || !running || closed || targetSHA != journal.NewBinarySHA || events[len(events)-1] != "activate" {
 					t.Fatal(err, updated.Phase, events)
 				}
